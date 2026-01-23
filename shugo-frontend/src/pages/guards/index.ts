@@ -1,0 +1,1 @@
+export { GuardsListPage } from './GuardsListPage';

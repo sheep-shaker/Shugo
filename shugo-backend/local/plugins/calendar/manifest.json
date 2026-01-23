@@ -1,0 +1,21 @@
+{
+  "id": "calendar",
+  "name": "Calendar Plugin",
+  "version": "1.0.0",
+  "description": "Activities and events management for SHUGO",
+  "author": "SHUGO Team",
+  "license": "MIT",
+  "dependencies": [],
+  "permissions": [
+    "database.write",
+    "notifications.send",
+    "sync.queue"
+  ],
+  "config": {
+    "sync_guards_to_calendar": false,
+    "default_visibility": "public",
+    "allow_registration": true,
+    "notification_days_before": 2,
+    "max_activities_per_user": 10
+  }
+}
