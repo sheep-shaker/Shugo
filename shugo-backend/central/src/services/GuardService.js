@@ -10,6 +10,8 @@
 
 const { Op, Transaction } = require('sequelize');
 const config = require('../config');
+const NotificationService = require('./NotificationService');
+const { NOTIFICATION_TYPES } = NotificationService;
 
 /**
  * Types d'annulation selon le délai
@@ -507,7 +509,7 @@ class GuardService {
           replacement_deadline: deadline
         }, { transaction: t });
 
-        // TODO: Envoyer notification au remplaçant
+        // Envoyer notification au remplaçant
         await this._notifyReplacement(replacementMemberId, guard, deadline);
       }
 
@@ -1003,25 +1005,153 @@ class GuardService {
     }
   }
 
-  // Méthodes de notification (à implémenter avec NotificationService)
+  // =========================================
+  // NOTIFICATIONS
+  // =========================================
+
+  /**
+   * Obtient une instance du NotificationService
+   * @private
+   */
+  _getNotificationService() {
+    if (!this._notificationService) {
+      this._notificationService = new NotificationService({
+        Notification: this.Notification,
+        User: this.User,
+        AuditLog: this.AuditLog
+      });
+    }
+    return this._notificationService;
+  }
+
+  /**
+   * Notifie un membre d'une demande de remplacement
+   */
   async _notifyReplacement(memberId, guard, deadline) {
-    // TODO: Implémenter avec NotificationService
+    try {
+      const notifService = this._getNotificationService();
+      await notifService.initialize();
+
+      const requester = await this.User.findByPk(guard.replacement_requester_id);
+      const requesterName = requester ?
+        `${requester.first_name_encrypted} ${requester.last_name_encrypted}` : 'Un membre';
+
+      await notifService.send(memberId, NOTIFICATION_TYPES.GUARD_REPLACEMENT_REQUEST, {
+        requesterName,
+        date: guard.guard_date,
+        startTime: guard.start_time,
+        endTime: guard.end_time,
+        deadline: deadline.toISOString()
+      }, { immediate: true });
+
+    } catch (err) {
+      console.error('[GuardService] Erreur notification remplacement:', err.message);
+    }
   }
 
+  /**
+   * Notifie un membre de son activation depuis la liste d'attente
+   */
   async _notifyWaitingListActivation(memberId, guard) {
-    // TODO: Implémenter avec NotificationService
+    try {
+      const notifService = this._getNotificationService();
+      await notifService.initialize();
+
+      await notifService.send(memberId, NOTIFICATION_TYPES.GUARD_WAITING_LIST_ACTIVATED, {
+        date: guard.guard_date,
+        startTime: guard.start_time,
+        endTime: guard.end_time
+      }, { immediate: true });
+
+    } catch (err) {
+      console.error('[GuardService] Erreur notification liste attente:', err.message);
+    }
   }
 
+  /**
+   * Notifie un membre de l'annulation de sa garde
+   */
   async _notifyGuardCancelled(memberId, guard, reason) {
-    // TODO: Implémenter avec NotificationService
+    try {
+      const notifService = this._getNotificationService();
+      await notifService.initialize();
+
+      await notifService.send(memberId, NOTIFICATION_TYPES.GUARD_CANCELLATION, {
+        date: guard.guard_date,
+        startTime: guard.start_time,
+        endTime: guard.end_time,
+        reason: reason || 'Non spécifié'
+      }, { immediate: true });
+
+    } catch (err) {
+      console.error('[GuardService] Erreur notification annulation:', err.message);
+    }
   }
 
+  /**
+   * Alerte les responsables d'une annulation tardive
+   */
   async _alertLateCancel(guard, memberId) {
-    // TODO: Alerter Platinum/Admin
+    try {
+      const notifService = this._getNotificationService();
+      await notifService.initialize();
+
+      // Trouver les admins et Platinum du même geo_id
+      const admins = await this.User.findAll({
+        where: {
+          geo_id: guard.geo_id,
+          role: { [Op.in]: ['Platinum', 'Admin', 'Admin_N1'] },
+          status: 'active'
+        },
+        attributes: ['member_id']
+      });
+
+      const user = await this.User.findByPk(memberId);
+      const userName = user ?
+        `${user.first_name_encrypted} ${user.last_name_encrypted}` : `Membre #${memberId}`;
+
+      for (const admin of admins) {
+        await notifService.send(admin.member_id, NOTIFICATION_TYPES.SYSTEM_ALERT, {
+          details: `Annulation tardive (< 72h) par ${userName} pour la garde du ${guard.guard_date} (${guard.start_time} - ${guard.end_time})`
+        }, { priority: 'high', immediate: true });
+      }
+
+    } catch (err) {
+      console.error('[GuardService] Erreur alerte annulation tardive:', err.message);
+    }
   }
 
+  /**
+   * Alerte les Platinum d'une annulation anticipée
+   */
   async _alertAnticipatedCancel(guard, memberId) {
-    // TODO: Alerter Platinum
+    try {
+      const notifService = this._getNotificationService();
+      await notifService.initialize();
+
+      // Trouver les Platinum du même geo_id
+      const platinums = await this.User.findAll({
+        where: {
+          geo_id: guard.geo_id,
+          role: 'Platinum',
+          status: 'active'
+        },
+        attributes: ['member_id']
+      });
+
+      const user = await this.User.findByPk(memberId);
+      const userName = user ?
+        `${user.first_name_encrypted} ${user.last_name_encrypted}` : `Membre #${memberId}`;
+
+      for (const platinum of platinums) {
+        await notifService.send(platinum.member_id, NOTIFICATION_TYPES.SYSTEM_ALERT, {
+          details: `Annulation anticipée par ${userName} pour la garde du ${guard.guard_date} (${guard.start_time} - ${guard.end_time})`
+        }, { immediate: true });
+      }
+
+    } catch (err) {
+      console.error('[GuardService] Erreur alerte annulation anticipée:', err.message);
+    }
   }
 }
 

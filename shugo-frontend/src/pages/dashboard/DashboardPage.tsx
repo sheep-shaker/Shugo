@@ -10,10 +10,12 @@ import {
   Bell,
   ArrowRight,
   CheckCircle,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
-import { cn, formatRelativeTime, getFullName } from '@/lib/utils';
+import { useDashboardStore } from '@/stores/dashboardStore';
+import { cn, formatRelativeTime, getFullName, formatDate } from '@/lib/utils';
 
 // Animation variants
 const containerVariants = {
@@ -72,55 +74,29 @@ function StatCard({ title, value, change, changeType, icon: Icon, color }: StatC
   );
 }
 
-// Mock data for demonstration
-const mockRecentGuards = [
-  {
-    id: '1',
-    location: 'Basilique Saint-Pierre',
-    date: new Date(Date.now() + 2 * 60 * 60 * 1000),
-    status: 'upcoming',
-    assignedTo: 'Marco Bianchi',
-  },
-  {
-    id: '2',
-    location: 'Chapelle Sixtine',
-    date: new Date(Date.now() - 1 * 60 * 60 * 1000),
-    status: 'active',
-    assignedTo: 'Luigi Romano',
-  },
-  {
-    id: '3',
-    location: 'Musées du Vatican',
-    date: new Date(Date.now() - 5 * 60 * 60 * 1000),
-    status: 'completed',
-    assignedTo: 'Giovanni Rossi',
-  },
-];
-
-const mockAlerts = [
-  {
-    id: '1',
-    type: 'warning',
-    message: 'Garde non assignée demain à 14h',
-    time: new Date(Date.now() - 30 * 60 * 1000),
-  },
-  {
-    id: '2',
-    type: 'info',
-    message: 'Nouveau lieu ajouté: Jardin du Vatican',
-    time: new Date(Date.now() - 2 * 60 * 60 * 1000),
-  },
-  {
-    id: '3',
-    type: 'success',
-    message: 'Rapport mensuel généré avec succès',
-    time: new Date(Date.now() - 4 * 60 * 60 * 1000),
-  },
-];
+// Helper to get guard status display
+const getGuardStatusInfo = (status: string) => {
+  switch (status) {
+    case 'full':
+      return { label: 'Complet', variant: 'success' as const };
+    case 'open':
+      return { label: 'Ouvert', variant: 'warning' as const };
+    case 'closed':
+      return { label: 'Fermé', variant: 'info' as const };
+    default:
+      return { label: status, variant: 'default' as const };
+  }
+};
 
 export function DashboardPage() {
   const { user } = useAuthStore();
+  const { stats, recentGuards, alerts, isLoading, fetchDashboardData, fetchAlerts } = useDashboardStore();
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    fetchDashboardData();
+    fetchAlerts();
+  }, [fetchDashboardData, fetchAlerts]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -178,29 +154,25 @@ export function DashboardPage() {
       >
         <StatCard
           title="Gardes aujourd'hui"
-          value={12}
-          change="+2 vs hier"
-          changeType="positive"
+          value={stats.guardsToday}
           icon={Shield}
           color="gold"
         />
         <StatCard
           title="Gardes actifs"
-          value={8}
+          value={stats.activeGuards}
           icon={Users}
           color="green"
         />
         <StatCard
           title="À venir (7j)"
-          value={45}
-          change="+12%"
-          changeType="positive"
+          value={stats.upcomingWeek}
           icon={Calendar}
           color="blue"
         />
         <StatCard
           title="Alertes"
-          value={3}
+          value={stats.alertsCount}
           icon={AlertTriangle}
           color="red"
         />
@@ -221,41 +193,47 @@ export function DashboardPage() {
               </Button>
             </CardHeader>
             <CardContent className="p-0">
+              {isLoading ? (
+                <div className="p-8 text-center">
+                  <Loader2 className="h-6 w-6 text-gold-500 mx-auto animate-spin" />
+                </div>
+              ) : (
               <div className="divide-y divide-marble-100">
-                {mockRecentGuards.map((guard) => (
+                {recentGuards.length > 0 ? recentGuards.map((guard) => {
+                  const statusInfo = getGuardStatusInfo(guard.status);
+                  return (
                   <div
-                    key={guard.id}
+                    key={guard.guard_id}
                     className="flex items-center justify-between p-4 hover:bg-marble-50 transition-colors"
                   >
                     <div className="flex items-center gap-4">
                       <div className={cn(
                         'w-10 h-10 rounded-xl flex items-center justify-center',
-                        guard.status === 'active' && 'bg-green-100 text-green-600',
-                        guard.status === 'upcoming' && 'bg-blue-100 text-blue-600',
-                        guard.status === 'completed' && 'bg-gray-100 text-gray-600'
+                        guard.status === 'full' && 'bg-green-100 text-green-600',
+                        guard.status === 'open' && 'bg-amber-100 text-amber-600',
+                        guard.status === 'closed' && 'bg-blue-100 text-blue-600'
                       )}>
                         <MapPin className="h-5 w-5" />
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900">{guard.location}</p>
+                        <p className="font-medium text-gray-900">{guard.geo_id}</p>
                         <p className="text-sm text-gray-500">
-                          {guard.assignedTo} • {formatRelativeTime(guard.date)}
+                          {formatDate(guard.guard_date)} • {guard.start_time} - {guard.end_time}
                         </p>
                       </div>
                     </div>
-                    <Badge
-                      variant={
-                        guard.status === 'active' ? 'success' :
-                        guard.status === 'upcoming' ? 'info' : 'default'
-                      }
-                    >
-                      {guard.status === 'active' && 'En cours'}
-                      {guard.status === 'upcoming' && 'À venir'}
-                      {guard.status === 'completed' && 'Terminée'}
+                    <Badge variant={statusInfo.variant}>
+                      {statusInfo.label}
                     </Badge>
                   </div>
-                ))}
+                );
+                }) : (
+                  <div className="p-8 text-center text-gray-500">
+                    Aucune garde récente
+                  </div>
+                )}
               </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -271,18 +249,20 @@ export function DashboardPage() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y divide-marble-100">
-                {mockAlerts.map((alert) => (
+                {alerts.length > 0 ? alerts.map((alert) => (
                   <div key={alert.id} className="p-4 hover:bg-marble-50 transition-colors">
                     <div className="flex items-start gap-3">
                       <div className={cn(
                         'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5',
                         alert.type === 'warning' && 'bg-amber-100 text-amber-600',
                         alert.type === 'info' && 'bg-blue-100 text-blue-600',
-                        alert.type === 'success' && 'bg-green-100 text-green-600'
+                        alert.type === 'success' && 'bg-green-100 text-green-600',
+                        alert.type === 'error' && 'bg-red-100 text-red-600'
                       )}>
                         {alert.type === 'warning' && <AlertTriangle className="h-4 w-4" />}
                         {alert.type === 'info' && <Bell className="h-4 w-4" />}
                         {alert.type === 'success' && <CheckCircle className="h-4 w-4" />}
+                        {alert.type === 'error' && <AlertTriangle className="h-4 w-4" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-gray-900">{alert.message}</p>
@@ -292,7 +272,11 @@ export function DashboardPage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="p-8 text-center text-gray-500">
+                    Aucune notification
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

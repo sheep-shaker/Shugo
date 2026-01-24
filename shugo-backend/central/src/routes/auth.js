@@ -18,6 +18,10 @@ const User = require('../models/User');
 const Session = require('../models/Session');
 const RegistrationToken = require('../models/RegistrationToken');
 const AuditLog = require('../models/AuditLog');
+const Notification = require('../models/Notification');
+
+// Services
+const NotificationService = require('../services/NotificationService');
 
 // Middleware
 const { authenticateToken, checkRole, verify2FA } = require('../middleware/auth');
@@ -437,11 +441,31 @@ router.post('/reset-password',
             expires_at: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
         });
         
-        // TODO: Send email with reset link
-        logger.info('Password reset requested', {
-            member_id: user.member_id,
-            token: resetToken // Remove in production
-        });
+        // Send email with reset link
+        try {
+            const notificationService = new NotificationService({
+                Notification,
+                User,
+                AuditLog
+            });
+            await notificationService.initialize();
+
+            const resetLink = `${config.app.frontendUrl}/auth/reset-password?token=${resetToken}`;
+
+            await notificationService.send(
+                user.member_id,
+                'account_password_reset',
+                { resetLink },
+                { channel: 'email', immediate: true }
+            );
+
+            logger.info('Password reset email sent', { member_id: user.member_id });
+        } catch (emailError) {
+            logger.error('Failed to send reset email', {
+                member_id: user.member_id,
+                error: emailError.message
+            });
+        }
         
         res.json({
             success: true,

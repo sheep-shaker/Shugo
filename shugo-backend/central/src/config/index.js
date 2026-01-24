@@ -40,6 +40,12 @@ const config = {
   isProd: process.env.NODE_ENV === 'production',
   isTest: process.env.NODE_ENV === 'test',
 
+  // === APPLICATION ===
+  app: {
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+    apiUrl: process.env.API_URL || 'http://localhost:3000'
+  },
+
   // === SERVEUR ===
   server: {
     name: process.env.SERVER_NAME || 'SHUGO-CENTRAL',

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   Calendar,
@@ -8,9 +8,12 @@ import {
   Clock,
   MapPin,
   Users,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from '@/components/ui';
 import { cn, formatDate } from '@/lib/utils';
+import { useGuardsStore } from '@/stores/guardsStore';
+import type { Guard } from '@/services/guards.service';
 
 // Animation variants
 const containerVariants = {
@@ -26,7 +29,7 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
-// Types
+// Types for calendar events derived from guards
 interface CalendarEvent {
   id: string;
   title: string;
@@ -36,85 +39,26 @@ interface CalendarEvent {
   type: 'guard' | 'meeting' | 'training';
   status: 'pending' | 'confirmed' | 'active' | 'completed';
   agents: number;
+  maxAgents: number;
 }
 
-// Mock events
-const generateMockEvents = (currentMonth: Date): CalendarEvent[] => {
-  const year = currentMonth.getFullYear();
-  const month = currentMonth.getMonth();
+// Convert Guard to CalendarEvent
+const guardToCalendarEvent = (guard: Guard): CalendarEvent => {
+  const [startHour, startMin] = (guard.start_time || '08:00').split(':').map(Number);
+  const [endHour, endMin] = (guard.end_time || '16:00').split(':').map(Number);
+  const guardDate = new Date(guard.guard_date);
 
-  return [
-    {
-      id: '1',
-      title: 'Garde Basilique',
-      location: 'Basilique Saint-Pierre',
-      start: new Date(year, month, 5, 8, 0),
-      end: new Date(year, month, 5, 16, 0),
-      type: 'guard',
-      status: 'confirmed',
-      agents: 4,
-    },
-    {
-      id: '2',
-      title: 'Formation Sécurité',
-      location: 'Centre de Formation',
-      start: new Date(year, month, 8, 9, 0),
-      end: new Date(year, month, 8, 17, 0),
-      type: 'training',
-      status: 'confirmed',
-      agents: 12,
-    },
-    {
-      id: '3',
-      title: 'Garde Musées',
-      location: 'Musées du Vatican',
-      start: new Date(year, month, 12, 6, 0),
-      end: new Date(year, month, 12, 14, 0),
-      type: 'guard',
-      status: 'pending',
-      agents: 6,
-    },
-    {
-      id: '4',
-      title: 'Réunion Coordination',
-      location: 'Salle de Conférence',
-      start: new Date(year, month, 15, 14, 0),
-      end: new Date(year, month, 15, 16, 0),
-      type: 'meeting',
-      status: 'confirmed',
-      agents: 8,
-    },
-    {
-      id: '5',
-      title: 'Garde Chapelle',
-      location: 'Chapelle Sixtine',
-      start: new Date(year, month, 18, 7, 0),
-      end: new Date(year, month, 18, 15, 0),
-      type: 'guard',
-      status: 'confirmed',
-      agents: 3,
-    },
-    {
-      id: '6',
-      title: 'Garde Place',
-      location: 'Place Saint-Pierre',
-      start: new Date(year, month, 22, 8, 0),
-      end: new Date(year, month, 22, 20, 0),
-      type: 'guard',
-      status: 'pending',
-      agents: 10,
-    },
-    {
-      id: '7',
-      title: 'Garde Nuit',
-      location: 'Basilique Saint-Pierre',
-      start: new Date(year, month, 25, 20, 0),
-      end: new Date(year, month, 26, 6, 0),
-      type: 'guard',
-      status: 'confirmed',
-      agents: 4,
-    },
-  ];
+  return {
+    id: guard.guard_id,
+    title: `Garde ${guard.geo_id}`,
+    location: guard.geo_id,
+    start: new Date(guardDate.getFullYear(), guardDate.getMonth(), guardDate.getDate(), startHour, startMin),
+    end: new Date(guardDate.getFullYear(), guardDate.getMonth(), guardDate.getDate(), endHour, endMin),
+    type: guard.guard_type === 'training' ? 'training' : 'guard',
+    status: guard.status === 'full' ? 'confirmed' : guard.status === 'open' ? 'pending' : 'completed',
+    agents: guard.current_participants,
+    maxAgents: guard.max_participants,
+  };
 };
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
@@ -128,7 +72,24 @@ export function PlanningPage() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
 
-  const events = generateMockEvents(currentDate);
+  const { guards, isLoading, fetchGuards } = useGuardsStore();
+
+  // Fetch guards for the current month
+  useEffect(() => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const startDate = new Date(year, month, 1).toISOString().split('T')[0];
+    const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
+
+    fetchGuards({
+      startDate,
+      endDate,
+      limit: 100,
+    });
+  }, [currentDate, fetchGuards]);
+
+  // Convert guards to calendar events
+  const events = useMemo(() => guards.map(guardToCalendarEvent), [guards]);
 
   // Calendar helpers
   const getDaysInMonth = (date: Date) => {
@@ -277,7 +238,14 @@ export function PlanningPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="relative">
+              {/* Loading overlay */}
+              {isLoading && (
+                <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10 rounded-xl">
+                  <Loader2 className="h-8 w-8 text-gold-500 animate-spin" />
+                </div>
+              )}
+
               {/* Days header */}
               <div className="grid grid-cols-7 mb-2">
                 {DAYS.map((day) => (
@@ -390,7 +358,7 @@ export function PlanningPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <Users className="h-4 w-4" />
-                            {event.agents} agents
+                            {event.agents}/{event.maxAgents} agents
                           </div>
                         </div>
 

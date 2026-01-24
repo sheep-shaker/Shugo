@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Shield,
@@ -14,9 +14,13 @@ import {
   Edit,
   Trash2,
   CheckCircle,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge } from '@/components/ui';
 import { cn, formatDate, formatTime, formatGuardStatus } from '@/lib/utils';
+import { useGuardsStore } from '@/stores/guardsStore';
+import type { Guard } from '@/services/guards.service';
 
 // Animation variants
 const containerVariants = {
@@ -32,76 +36,23 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
-// Mock data
-const mockGuards = [
-  {
-    id: '1',
-    title: 'Garde Basilique - Matin',
-    location: 'Basilique Saint-Pierre',
-    start_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-    status: 'pending' as const,
-    required_agents: 4,
-    assigned_count: 2,
-    guard_type: 'standard' as const,
-  },
-  {
-    id: '2',
-    title: 'Garde Chapelle Sixtine',
-    location: 'Chapelle Sixtine',
-    start_time: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
-    status: 'active' as const,
-    required_agents: 3,
-    assigned_count: 3,
-    guard_type: 'special' as const,
-  },
-  {
-    id: '3',
-    title: 'Garde Musées Vatican',
-    location: 'Musées du Vatican',
-    start_time: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    status: 'completed' as const,
-    required_agents: 6,
-    assigned_count: 6,
-    guard_type: 'standard' as const,
-  },
-  {
-    id: '4',
-    title: 'Formation Nouveaux Recrues',
-    location: 'Centre de Formation',
-    start_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() + 30 * 60 * 60 * 1000).toISOString(),
-    status: 'confirmed' as const,
-    required_agents: 10,
-    assigned_count: 8,
-    guard_type: 'training' as const,
-  },
-  {
-    id: '5',
-    title: 'Garde Place Saint-Pierre',
-    location: 'Place Saint-Pierre',
-    start_time: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() + 54 * 60 * 60 * 1000).toISOString(),
-    status: 'pending' as const,
-    required_agents: 8,
-    assigned_count: 3,
-    guard_type: 'standard' as const,
-  },
-];
-
-type FilterStatus = 'all' | 'pending' | 'active' | 'completed' | 'confirmed';
+type FilterStatus = 'all' | 'open' | 'full' | 'closed' | 'cancelled';
 
 export function GuardsListPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const filteredGuards = mockGuards.filter((guard) => {
+  const { guards, isLoading, error, pagination, fetchGuards, cancelGuard } = useGuardsStore();
+
+  useEffect(() => {
+    fetchGuards({ limit: 50 });
+  }, [fetchGuards]);
+
+  const filteredGuards = guards.filter((guard) => {
     const matchesSearch =
-      guard.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      guard.location.toLowerCase().includes(searchQuery.toLowerCase());
+      guard.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      guard.geo_id.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = filterStatus === 'all' || guard.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
@@ -159,7 +110,7 @@ export function GuardsListPage() {
               <Shield className="h-5 w-5 text-gold-600" />
             </div>
             <div>
-              <p className="text-2xl font-semibold text-gray-900">{mockGuards.length}</p>
+              <p className="text-2xl font-semibold text-gray-900">{pagination.total}</p>
               <p className="text-sm text-gray-500">Total gardes</p>
             </div>
           </div>
@@ -171,9 +122,9 @@ export function GuardsListPage() {
             </div>
             <div>
               <p className="text-2xl font-semibold text-gray-900">
-                {mockGuards.filter((g) => g.status === 'active').length}
+                {guards.filter((g) => g.status === 'full').length}
               </p>
-              <p className="text-sm text-gray-500">En cours</p>
+              <p className="text-sm text-gray-500">Complètes</p>
             </div>
           </div>
         </Card>
@@ -184,9 +135,9 @@ export function GuardsListPage() {
             </div>
             <div>
               <p className="text-2xl font-semibold text-gray-900">
-                {mockGuards.filter((g) => g.status === 'pending').length}
+                {guards.filter((g) => g.status === 'open').length}
               </p>
-              <p className="text-sm text-gray-500">En attente</p>
+              <p className="text-sm text-gray-500">Ouvertes</p>
             </div>
           </div>
         </Card>
@@ -197,9 +148,9 @@ export function GuardsListPage() {
             </div>
             <div>
               <p className="text-2xl font-semibold text-gray-900">
-                {mockGuards.filter((g) => g.status === 'confirmed').length}
+                {guards.filter((g) => g.status === 'closed').length}
               </p>
-              <p className="text-sm text-gray-500">Confirmées</p>
+              <p className="text-sm text-gray-500">Fermées</p>
             </div>
           </div>
         </Card>
@@ -222,10 +173,10 @@ export function GuardsListPage() {
             <div className="flex gap-2 flex-wrap">
               {[
                 { value: 'all', label: 'Tous' },
-                { value: 'active', label: 'En cours' },
-                { value: 'pending', label: 'En attente' },
-                { value: 'confirmed', label: 'Confirmées' },
-                { value: 'completed', label: 'Terminées' },
+                { value: 'open', label: 'Ouvertes' },
+                { value: 'full', label: 'Complètes' },
+                { value: 'closed', label: 'Fermées' },
+                { value: 'cancelled', label: 'Annulées' },
               ].map((filter) => (
                 <button
                   key={filter.value}
@@ -245,6 +196,18 @@ export function GuardsListPage() {
         </Card>
       </motion.div>
 
+      {/* Error State */}
+      {error && (
+        <motion.div variants={itemVariants}>
+          <Card variant="default" padding="md" className="border-red-200 bg-red-50">
+            <div className="flex items-center gap-3 text-red-700">
+              <AlertCircle className="h-5 w-5" />
+              <p>{error}</p>
+            </div>
+          </Card>
+        </motion.div>
+      )}
+
       {/* Guards List */}
       <motion.div variants={itemVariants}>
         <Card variant="elevated">
@@ -255,12 +218,21 @@ export function GuardsListPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            {/* Loading State */}
+            {isLoading && (
+              <div className="p-12 text-center">
+                <Loader2 className="h-8 w-8 text-gold-500 mx-auto mb-4 animate-spin" />
+                <p className="text-gray-500">Chargement des gardes...</p>
+              </div>
+            )}
+
+            {!isLoading && (
             <div className="divide-y divide-marble-100">
               {filteredGuards.map((guard) => {
                 const statusInfo = formatGuardStatus(guard.status);
                 return (
                   <motion.div
-                    key={guard.id}
+                    key={guard.guard_id}
                     variants={itemVariants}
                     className="p-4 hover:bg-marble-50 transition-colors"
                   >
@@ -269,24 +241,26 @@ export function GuardsListPage() {
                         {/* Icon */}
                         <div className={cn(
                           'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
-                          guard.status === 'active' && 'bg-green-100',
-                          guard.status === 'pending' && 'bg-amber-100',
-                          guard.status === 'confirmed' && 'bg-blue-100',
-                          guard.status === 'completed' && 'bg-gray-100'
+                          guard.status === 'full' && 'bg-green-100',
+                          guard.status === 'open' && 'bg-amber-100',
+                          guard.status === 'closed' && 'bg-blue-100',
+                          guard.status === 'cancelled' && 'bg-gray-100'
                         )}>
                           <Shield className={cn(
                             'h-6 w-6',
-                            guard.status === 'active' && 'text-green-600',
-                            guard.status === 'pending' && 'text-amber-600',
-                            guard.status === 'confirmed' && 'text-blue-600',
-                            guard.status === 'completed' && 'text-gray-600'
+                            guard.status === 'full' && 'text-green-600',
+                            guard.status === 'open' && 'text-amber-600',
+                            guard.status === 'closed' && 'text-blue-600',
+                            guard.status === 'cancelled' && 'text-gray-600'
                           )} />
                         </div>
 
                         {/* Info */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-medium text-gray-900">{guard.title}</h3>
+                            <h3 className="font-medium text-gray-900">
+                              Garde du {formatDate(guard.guard_date)}
+                            </h3>
                             <span className={cn(
                               'px-2 py-0.5 rounded-full text-xs font-medium',
                               getGuardTypeColor(guard.guard_type)
@@ -298,19 +272,19 @@ export function GuardsListPage() {
                           <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-500">
                             <span className="flex items-center gap-1">
                               <MapPin className="h-4 w-4" />
-                              {guard.location}
+                              {guard.geo_id}
                             </span>
                             <span className="flex items-center gap-1">
                               <Calendar className="h-4 w-4" />
-                              {formatDate(guard.start_time)}
+                              {formatDate(guard.guard_date)}
                             </span>
                             <span className="flex items-center gap-1">
                               <Clock className="h-4 w-4" />
-                              {formatTime(guard.start_time)} - {formatTime(guard.end_time)}
+                              {guard.start_time} - {guard.end_time}
                             </span>
                             <span className="flex items-center gap-1">
                               <Users className="h-4 w-4" />
-                              {guard.assigned_count}/{guard.required_agents} agents
+                              {guard.current_participants}/{guard.max_participants} agents
                             </span>
                           </div>
 
@@ -320,15 +294,15 @@ export function GuardsListPage() {
                               <div
                                 className={cn(
                                   'h-full rounded-full transition-all',
-                                  guard.assigned_count >= guard.required_agents
+                                  guard.current_participants >= guard.max_participants
                                     ? 'bg-green-500'
-                                    : guard.assigned_count > 0
+                                    : guard.current_participants > 0
                                     ? 'bg-amber-500'
                                     : 'bg-red-500'
                                 )}
                                 style={{
                                   width: `${Math.min(
-                                    (guard.assigned_count / guard.required_agents) * 100,
+                                    (guard.current_participants / guard.max_participants) * 100,
                                     100
                                   )}%`,
                                 }}
@@ -342,9 +316,9 @@ export function GuardsListPage() {
                       <div className="flex items-center gap-2">
                         <Badge
                           variant={
-                            guard.status === 'active' ? 'success' :
-                            guard.status === 'pending' ? 'warning' :
-                            guard.status === 'confirmed' ? 'info' : 'default'
+                            guard.status === 'full' ? 'success' :
+                            guard.status === 'open' ? 'warning' :
+                            guard.status === 'closed' ? 'info' : 'default'
                           }
                         >
                           {statusInfo.label}
@@ -353,13 +327,13 @@ export function GuardsListPage() {
                         {/* Dropdown menu */}
                         <div className="relative">
                           <button
-                            onClick={() => setOpenMenuId(openMenuId === guard.id ? null : guard.id)}
+                            onClick={() => setOpenMenuId(openMenuId === guard.guard_id ? null : guard.guard_id)}
                             className="p-2 rounded-lg hover:bg-marble-100 transition-colors"
                           >
                             <MoreVertical className="h-5 w-5 text-gray-400" />
                           </button>
 
-                          {openMenuId === guard.id && (
+                          {openMenuId === guard.guard_id && (
                             <>
                               <div
                                 className="fixed inset-0 z-10"
@@ -388,13 +362,14 @@ export function GuardsListPage() {
                 );
               })}
 
-              {filteredGuards.length === 0 && (
+              {filteredGuards.length === 0 && !isLoading && (
                 <div className="p-12 text-center">
                   <Shield className="h-12 w-12 text-gray-300 mx-auto mb-4" />
                   <p className="text-gray-500">Aucune garde trouvée</p>
                 </div>
               )}
             </div>
+            )}
           </CardContent>
         </Card>
       </motion.div>

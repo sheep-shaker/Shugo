@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   User,
@@ -12,10 +12,12 @@ import {
   Clock,
   Calendar,
   MapPin,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge, Avatar } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
-import { getFullName, formatRole, formatDate } from '@/lib/utils';
+import { useGuardsStore } from '@/stores/guardsStore';
+import { getFullName, formatRole, formatDate, formatRelativeTime } from '@/lib/utils';
 
 // Animation variants
 const containerVariants = {
@@ -33,22 +35,26 @@ const itemVariants = {
 
 export function ProfilePage() {
   const { user } = useAuthStore();
+  const { mySchedule, isLoading, fetchMySchedule } = useGuardsStore();
   const [isEditing, setIsEditing] = useState(false);
 
-  // Mock stats
-  const stats = {
-    totalGuards: 156,
-    hoursWorked: 1248,
-    completionRate: 98,
-    currentMonth: 12,
-  };
+  useEffect(() => {
+    fetchMySchedule();
+  }, [fetchMySchedule]);
 
-  // Mock recent activity
-  const recentActivity = [
-    { id: '1', action: 'Garde terminée', location: 'Basilique Saint-Pierre', date: new Date(Date.now() - 2 * 60 * 60 * 1000) },
-    { id: '2', action: 'Connexion', location: 'Système', date: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-    { id: '3', action: 'Garde assignée', location: 'Chapelle Sixtine', date: new Date(Date.now() - 48 * 60 * 60 * 1000) },
-  ];
+  // Calculate stats from my schedule
+  const currentMonthGuards = mySchedule.filter((g) => {
+    const guardDate = new Date(g.guard_date);
+    const now = new Date();
+    return guardDate.getMonth() === now.getMonth() && guardDate.getFullYear() === now.getFullYear();
+  });
+
+  const stats = {
+    totalGuards: mySchedule.length,
+    hoursWorked: mySchedule.length * 8, // Estimate 8h per guard
+    completionRate: mySchedule.filter((g) => g.status === 'closed').length / Math.max(mySchedule.length, 1) * 100,
+    currentMonth: currentMonthGuards.length,
+  };
 
   const userName = getFullName(user);
 
@@ -107,11 +113,11 @@ export function ProfilePage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="text-center">
                     <p className="text-2xl font-semibold text-gold-600">{stats.totalGuards}</p>
-                    <p className="text-sm text-gray-500">Gardes totales</p>
+                    <p className="text-sm text-gray-500">Gardes programmées</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-2xl font-semibold text-gold-600">{stats.hoursWorked}h</p>
-                    <p className="text-sm text-gray-500">Heures travaillées</p>
+                    <p className="text-2xl font-semibold text-gold-600">{stats.currentMonth}</p>
+                    <p className="text-sm text-gray-500">Ce mois</p>
                   </div>
                 </div>
               </div>
@@ -210,53 +216,71 @@ export function ProfilePage() {
             <Card variant="default" padding="md">
               <div className="text-center">
                 <Clock className="h-6 w-6 text-blue-500 mx-auto mb-2" />
-                <p className="text-2xl font-semibold text-gray-900">96h</p>
-                <p className="text-xs text-gray-500">Heures ce mois</p>
+                <p className="text-2xl font-semibold text-gray-900">{stats.currentMonth * 8}h</p>
+                <p className="text-xs text-gray-500">Heures estimées</p>
               </div>
             </Card>
             <Card variant="default" padding="md">
               <div className="text-center">
                 <Calendar className="h-6 w-6 text-green-500 mx-auto mb-2" />
-                <p className="text-2xl font-semibold text-gray-900">{stats.completionRate}%</p>
-                <p className="text-xs text-gray-500">Taux présence</p>
+                <p className="text-2xl font-semibold text-gray-900">{Math.round(stats.completionRate)}%</p>
+                <p className="text-xs text-gray-500">Gardes terminées</p>
               </div>
             </Card>
             <Card variant="default" padding="md">
               <div className="text-center">
                 <MapPin className="h-6 w-6 text-purple-500 mx-auto mb-2" />
-                <p className="text-2xl font-semibold text-gray-900">5</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {new Set(mySchedule.map((g) => g.geo_id)).size}
+                </p>
                 <p className="text-xs text-gray-500">Lieux différents</p>
               </div>
             </Card>
           </div>
 
-          {/* Recent Activity */}
+          {/* Recent Guards */}
           <Card variant="elevated">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Bell className="h-5 w-5 text-gold-500" />
-                Activité récente
+                Mes gardes récentes
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
+              {isLoading ? (
+                <div className="p-8 text-center">
+                  <Loader2 className="h-6 w-6 text-gold-500 mx-auto animate-spin" />
+                </div>
+              ) : (
               <div className="divide-y divide-marble-100">
-                {recentActivity.map((activity) => (
-                  <div key={activity.id} className="p-4 hover:bg-marble-50 transition-colors">
+                {mySchedule.length > 0 ? mySchedule.slice(0, 5).map((guard) => (
+                  <div key={guard.guard_id} className="p-4 hover:bg-marble-50 transition-colors">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-gold-100 rounded-xl flex items-center justify-center">
                         <Shield className="h-5 w-5 text-gold-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="font-medium text-gray-900">{activity.action}</p>
-                        <p className="text-sm text-gray-500">{activity.location}</p>
+                        <p className="font-medium text-gray-900">Garde {guard.geo_id}</p>
+                        <p className="text-sm text-gray-500">{guard.start_time} - {guard.end_time}</p>
                       </div>
-                      <p className="text-sm text-gray-400">
-                        {activity.date.toLocaleDateString('fr-FR')}
-                      </p>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-900">{formatDate(guard.guard_date)}</p>
+                        <Badge
+                          variant={guard.status === 'full' ? 'success' : guard.status === 'open' ? 'warning' : 'default'}
+                          size="sm"
+                        >
+                          {guard.status === 'full' ? 'Confirmé' : guard.status === 'open' ? 'Ouvert' : 'Terminé'}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
-                ))}
+                )) : (
+                  <div className="p-8 text-center text-gray-500">
+                    Aucune garde programmée
+                  </div>
+                )}
               </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>

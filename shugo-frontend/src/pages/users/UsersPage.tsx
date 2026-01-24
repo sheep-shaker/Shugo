@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users,
@@ -14,9 +14,12 @@ import {
   Phone,
   UserCheck,
   UserX,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge, Avatar } from '@/components/ui';
 import { cn, getFullName, formatRole, formatDate } from '@/lib/utils';
+import { useUsersStore } from '@/stores/usersStore';
 
 // Animation variants
 const containerVariants = {
@@ -32,82 +35,6 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
-// Mock users data
-const mockUsers = [
-  {
-    member_id: '1',
-    first_name: 'Marco',
-    last_name: 'Bianchi',
-    email: 'marco.bianchi@vatican.va',
-    phone: '+39 06 6988 1234',
-    role: 'Admin_N1' as const,
-    status: 'active' as const,
-    avatar_url: undefined,
-    created_at: '2023-01-15',
-    guards_count: 245,
-  },
-  {
-    member_id: '2',
-    first_name: 'Luigi',
-    last_name: 'Romano',
-    email: 'luigi.romano@vatican.va',
-    phone: '+39 06 6988 2345',
-    role: 'Admin' as const,
-    status: 'active' as const,
-    avatar_url: undefined,
-    created_at: '2023-03-20',
-    guards_count: 189,
-  },
-  {
-    member_id: '3',
-    first_name: 'Giovanni',
-    last_name: 'Rossi',
-    email: 'giovanni.rossi@vatican.va',
-    phone: '+39 06 6988 3456',
-    role: 'Platinum' as const,
-    status: 'active' as const,
-    avatar_url: undefined,
-    created_at: '2023-05-10',
-    guards_count: 156,
-  },
-  {
-    member_id: '4',
-    first_name: 'Francesco',
-    last_name: 'Conti',
-    email: 'francesco.conti@vatican.va',
-    phone: '+39 06 6988 4567',
-    role: 'Gold' as const,
-    status: 'active' as const,
-    avatar_url: undefined,
-    created_at: '2023-07-01',
-    guards_count: 98,
-  },
-  {
-    member_id: '5',
-    first_name: 'Antonio',
-    last_name: 'Ferrari',
-    email: 'antonio.ferrari@vatican.va',
-    phone: '+39 06 6988 5678',
-    role: 'Silver' as const,
-    status: 'inactive' as const,
-    avatar_url: undefined,
-    created_at: '2023-09-15',
-    guards_count: 45,
-  },
-  {
-    member_id: '6',
-    first_name: 'Paolo',
-    last_name: 'Esposito',
-    email: 'paolo.esposito@vatican.va',
-    phone: '+39 06 6988 6789',
-    role: 'Gold' as const,
-    status: 'suspended' as const,
-    avatar_url: undefined,
-    created_at: '2023-11-20',
-    guards_count: 67,
-  },
-];
-
 type FilterRole = 'all' | 'Admin_N1' | 'Admin' | 'Platinum' | 'Gold' | 'Silver';
 type FilterStatus = 'all' | 'active' | 'inactive' | 'suspended';
 
@@ -117,7 +44,13 @@ export function UsersPage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const filteredUsers = mockUsers.filter((user) => {
+  const { users, isLoading, error, pagination, fetchUsers, deleteUser } = useUsersStore();
+
+  useEffect(() => {
+    fetchUsers({ limit: 50 });
+  }, [fetchUsers]);
+
+  const filteredUsers = users.filter((user) => {
     const fullName = getFullName(user).toLowerCase();
     const matchesSearch =
       fullName.includes(searchQuery.toLowerCase()) ||
@@ -189,7 +122,7 @@ export function UsersPage() {
               <Users className="h-5 w-5 text-gold-600" />
             </div>
             <div>
-              <p className="text-2xl font-semibold text-gray-900">{mockUsers.length}</p>
+              <p className="text-2xl font-semibold text-gray-900">{pagination.total}</p>
               <p className="text-sm text-gray-500">Total utilisateurs</p>
             </div>
           </div>
@@ -201,7 +134,7 @@ export function UsersPage() {
             </div>
             <div>
               <p className="text-2xl font-semibold text-gray-900">
-                {mockUsers.filter((u) => u.status === 'active').length}
+                {users.filter((u) => u.status === 'active').length}
               </p>
               <p className="text-sm text-gray-500">Actifs</p>
             </div>
@@ -214,7 +147,7 @@ export function UsersPage() {
             </div>
             <div>
               <p className="text-2xl font-semibold text-gray-900">
-                {mockUsers.filter((u) => u.status === 'suspended').length}
+                {users.filter((u) => u.status === 'suspended').length}
               </p>
               <p className="text-sm text-gray-500">Suspendus</p>
             </div>
@@ -227,13 +160,25 @@ export function UsersPage() {
             </div>
             <div>
               <p className="text-2xl font-semibold text-gray-900">
-                {mockUsers.filter((u) => u.role === 'Admin_N1' || u.role === 'Admin').length}
+                {users.filter((u) => u.role === 'Admin_N1' || u.role === 'Admin').length}
               </p>
               <p className="text-sm text-gray-500">Administrateurs</p>
             </div>
           </div>
         </Card>
       </motion.div>
+
+      {/* Error State */}
+      {error && (
+        <motion.div variants={itemVariants}>
+          <Card variant="default" padding="md" className="border-red-200 bg-red-50">
+            <div className="flex items-center gap-3 text-red-700">
+              <AlertCircle className="h-5 w-5" />
+              <p>{error}</p>
+            </div>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Filters */}
       <motion.div variants={itemVariants}>
@@ -315,6 +260,15 @@ export function UsersPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
+            {/* Loading State */}
+            {isLoading && (
+              <div className="p-12 text-center">
+                <Loader2 className="h-8 w-8 text-gold-500 mx-auto mb-4 animate-spin" />
+                <p className="text-gray-500">Chargement des utilisateurs...</p>
+              </div>
+            )}
+
+            {!isLoading && (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -323,7 +277,7 @@ export function UsersPage() {
                       Utilisateur
                     </th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
-                      Contact
+                      Email
                     </th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
                       Rôle
@@ -332,7 +286,7 @@ export function UsersPage() {
                       Statut
                     </th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
-                      Gardes
+                      Zone
                     </th>
                     <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
                       Actions
@@ -345,7 +299,6 @@ export function UsersPage() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <Avatar
-                            src={user.avatar_url}
                             name={getFullName(user)}
                             size="md"
                           />
@@ -358,15 +311,9 @@ export function UsersPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <Mail className="h-4 w-4" />
-                            {user.email}
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <Phone className="h-4 w-4" />
-                            {user.phone}
-                          </div>
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Mail className="h-4 w-4" />
+                          {user.email}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -380,10 +327,7 @@ export function UsersPage() {
                         </Badge>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <Shield className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm text-gray-900">{user.guards_count}</span>
-                        </div>
+                        <span className="text-sm text-gray-600">{user.geo_id}</span>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="relative inline-block">
@@ -409,7 +353,15 @@ export function UsersPage() {
                                   <Edit className="h-4 w-4" />
                                   Modifier
                                 </button>
-                                <button className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    if (confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')) {
+                                      deleteUser(user.member_id);
+                                      setOpenMenuId(null);
+                                    }
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                >
                                   <Trash2 className="h-4 w-4" />
                                   Supprimer
                                 </button>
@@ -430,6 +382,7 @@ export function UsersPage() {
                 </div>
               )}
             </div>
+            )}
           </CardContent>
         </Card>
       </motion.div>
