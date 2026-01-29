@@ -1,182 +1,248 @@
-# 🛡️ SHUGO V7 - Production Ready
+# SHUGO v7.0
 
-## 📦 Contenu de l'archive
+**Système Hiérarchisé d'Utilisation et de Gestion Opérationnelle**
 
-Cette archive contient le backend complet de SHUGO v7 avec :
+Application de gestion de plannings de garde communautaire avec architecture distribuée.
 
-- **84 fichiers JavaScript** validés syntaxiquement
-- **Serveur Central** (36 fichiers) - Pour déploiement AWS/VPS
-- **Serveur Local** (38 fichiers) - Pour Raspberry Pi
-- **Package Core** (9 fichiers) - Code partagé
-- **SDK Plugin** (1 fichier) - Base pour extensions
-
-## 🚀 Démarrage Rapide
-
-### Serveur Central (AWS/VPS)
-
-```bash
-# Extraire l'archive
-tar -xzf SHUGO-v7-PRODUCTION-READY.tar.gz
-
-# Aller dans le dossier central
-cd shugo-backend/central
-
-# Copier et configurer l'environnement
-cp .env.example .env
-nano .env  # Configurer les variables
-
-# Installer les dépendances
-npm install
-
-# Générer les clés de sécurité
-npm run generate-keys
-
-# Migrer la base de données
-npm run migrate
-
-# Créer le premier admin
-npm run create-admin
-
-# Démarrer le serveur
-npm start
-```
-
-### Serveur Local (Raspberry Pi)
-
-```bash
-# Aller dans le dossier local
-cd shugo-platform/packages/local
-
-# Copier et configurer l'environnement
-cp .env.example .env
-nano .env  # Configurer les variables
-
-# Installer les dépendances
-npm install
-
-# Setup initial
-npm run setup
-
-# Migrer la base de données
-npm run migrate
-
-# Démarrer le serveur
-npm start
-```
-
-## 📋 Scripts Disponibles
-
-### Serveur Central
-| Script | Description |
-|--------|-------------|
-| `npm start` | Démarrer en production |
-| `npm run dev` | Démarrer en développement |
-| `npm run migrate` | Migrer la base de données |
-| `npm run backup` | Créer une sauvegarde |
-| `npm run generate-keys` | Générer les clés de sécurité |
-| `npm run create-admin` | Créer un administrateur |
-
-### Serveur Local
-| Script | Description |
-|--------|-------------|
-| `npm start` | Démarrer en production |
-| `npm run dev` | Démarrer en développement |
-| `npm run setup` | Configuration initiale |
-| `npm run migrate` | Migrer la base de données |
-| `npm run deploy` | Déployer sur Raspberry Pi |
-| `npm run sync:pull` | Synchroniser depuis le central |
-| `npm run sync:push` | Envoyer vers le central |
-
-## 🔧 Configuration Requise
-
-### Serveur Central
-- Node.js >= 18.0.0
-- PostgreSQL >= 15
-- Redis (optionnel)
-- 2 GB RAM minimum
-- 10 GB espace disque
-
-### Serveur Local (Raspberry Pi)
-- Node.js >= 18.0.0
-- Raspberry Pi 4 (recommandé)
-- 2 GB RAM minimum
-- 16 GB carte SD
-
-## 🔐 Sécurité
-
-L'archive inclut :
-- ✅ Authentification JWT + 2FA (TOTP)
-- ✅ Chiffrement AES-256-GCM
-- ✅ Hachage Argon2
-- ✅ Signature HMAC pour sync
-- ✅ Rate limiting
-- ✅ Helmet (headers sécurité)
-- ✅ CORS configuré
-- ✅ Validation Joi
-
-## 📁 Structure
+## Architecture
 
 ```
-shugo-backend/
-└── central/
-    ├── src/
-    │   ├── index.js          # Point d'entrée
-    │   ├── config/           # Configuration
-    │   ├── database/         # Connexion DB
-    │   ├── middleware/       # Auth, errors, etc.
-    │   ├── models/           # 13 modèles Sequelize
-    │   ├── routes/           # 6 routes API
-    │   ├── services/         # Business logic
-    │   ├── cron/             # Tâches planifiées
-    │   └── utils/            # Crypto, logger
-    ├── scripts/              # 4 scripts utilitaires
-    ├── package.json
-    └── .env.example
+                    ┌─────────────────────┐
+                    │     Frontend        │
+                    │   (React + Vite)    │
+                    │   localhost:5173    │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┴────────────────┐
+              │                                 │
+              ▼                                 ▼
+┌─────────────────────────┐       ┌─────────────────────────┐
+│    Serveur Central      │       │    Serveur Local        │
+│      (Express.js)       │◄─────►│    (Raspberry Pi)       │
+│    localhost:3000       │ Sync  │    localhost:3001       │
+│                         │       │                         │
+│ - Authentification      │       │ - Gestion des gardes    │
+│ - Gestion utilisateurs  │       │ - Inscriptions          │
+│ - Groupes & Locations   │       │ - Planning local        │
+│ - Notifications         │       │ - Mode hors-ligne       │
+└─────────────────────────┘       └─────────────────────────┘
+         │                                   │
+         ▼                                   ▼
+    PostgreSQL                           SQLite
+   (Production)                      (Embarqué Pi)
+```
 
-shugo-platform/
-├── packages/
-│   ├── core/                 # Code partagé
-│   │   ├── models/           # BaseModel
-│   │   ├── services/         # BaseService
-│   │   ├── events/           # EventBus
-│   │   ├── utils/            # Crypto, helpers
-│   │   └── constants/        # Rôles, erreurs
-│   ├── local/                # Serveur Raspberry Pi
+## Statut du Projet
+
+| Composant | Statut | Description |
+|-----------|--------|-------------|
+| Frontend | En développement | React 19 + Vite + TailwindCSS |
+| Serveur Central | Fonctionnel | Express.js + Sequelize |
+| Serveur Local | A développer | Pour Raspberry Pi 5 |
+
+## Structure du Projet
+
+```
+shugo.app/
+├── shugo-frontend/          # Application React
+│   ├── src/
+│   │   ├── components/      # Composants UI (shadcn/ui)
+│   │   ├── pages/           # Pages de l'application
+│   │   ├── services/        # Appels API
+│   │   ├── stores/          # State management (Zustand)
+│   │   └── lib/             # Utilitaires
+│   └── package.json
+│
+├── shugo-backend/
+│   ├── central/             # Serveur Central
 │   │   ├── src/
-│   │   │   ├── index.js      # Point d'entrée
-│   │   │   ├── config/
-│   │   │   ├── database/
-│   │   │   ├── middleware/
-│   │   │   ├── models/       # 11 modèles
-│   │   │   ├── routes/       # 7 routes
-│   │   │   ├── services/
-│   │   │   ├── sync/         # SyncManager
-│   │   │   ├── vault/        # LocalVault
-│   │   │   └── plugins/
-│   │   ├── scripts/          # 5 scripts
-│   │   └── plugins/          # Plugin calendar
-│   └── sdk/                  # Base pour plugins
-└── package.json
+│   │   │   ├── config/      # Configuration
+│   │   │   ├── database/    # Connexion DB
+│   │   │   ├── middleware/  # Auth, CORS, etc.
+│   │   │   ├── models/      # 9 modèles Sequelize
+│   │   │   ├── routes/      # API REST
+│   │   │   ├── services/    # Logique métier
+│   │   │   └── utils/       # Logger, crypto
+│   │   └── package.json
+│   │
+│   ├── local/               # Serveur Local (Raspberry Pi)
+│   │   └── (à développer)
+│   │
+│   └── core/                # Code partagé
+│
+├── TODOLIST-SHUGO-V7.md     # Liste des tâches restantes
+└── README.md
 ```
 
-## ✅ Vérifications Effectuées
+## Démarrage Rapide
 
-- [x] Syntaxe JavaScript valide (84/84 fichiers)
-- [x] Tous les require() pointent vers des fichiers existants
-- [x] Tous les scripts npm ont leurs fichiers
-- [x] Modèle SystemLog créé pour le nettoyage des logs
-- [x] Scripts de synchronisation créés
-- [x] Script de déploiement Raspberry Pi créé
-- [x] Dossiers logs/backups/data créés
+### Prérequis
 
-## 📞 Support
+- Node.js >= 20.11.0
+- npm >= 10.0.0
+- Git
 
-En cas de problème, vérifier :
-1. Version Node.js >= 18
-2. Variables d'environnement configurées
-3. Base de données accessible
-4. Ports non utilisés (3000 central, 3001 local)
+### Installation
+
+```bash
+# Cloner le dépôt
+git clone https://github.com/sheep-shaker/Shugo.git
+cd Shugo
+
+# --- Backend (Serveur Central) ---
+cd shugo-backend/central
+cp .env.example .env
+npm install
+npm run dev
+
+# --- Frontend (dans un autre terminal) ---
+cd shugo-frontend
+npm install
+npm run dev
+```
+
+### Accès
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Frontend | http://localhost:5173 | Application React |
+| Backend API | http://localhost:3000 | Serveur Central |
+| API Docs | http://localhost:3000/api-docs | Swagger UI |
+| Health Check | http://localhost:3000/health | État du serveur |
+
+### Compte Admin Test
+
+```
+Email: shugopaca@gmail.com
+Mot de passe: ShugoAdmin2024!
+```
+
+## Scripts Disponibles
+
+### Backend Central
+
+```bash
+npm run dev              # Démarrer en mode développement
+npm start                # Démarrer en production
+npm test                 # Lancer les tests
+npm run lint             # Vérifier le code
+npm run scripts:create-admin    # Créer un admin
+npm run scripts:backup          # Sauvegarder la DB
+```
+
+### Frontend
+
+```bash
+npm run dev      # Démarrer le serveur de développement
+npm run build    # Build de production
+npm run preview  # Prévisualiser le build
+npm run lint     # Vérifier le code
+```
+
+## API Endpoints
+
+### Authentification
+- `POST /api/v1/auth/login` - Connexion
+- `POST /api/v1/auth/register` - Inscription
+- `POST /api/v1/auth/refresh` - Rafraîchir le token
+- `POST /api/v1/auth/logout` - Déconnexion
+
+### Utilisateurs
+- `GET /api/v1/users` - Liste des utilisateurs (Admin)
+- `GET /api/v1/users/me` - Profil utilisateur
+- `POST /api/v1/users` - Créer un utilisateur (Admin)
+- `PATCH /api/v1/users/:id` - Modifier un utilisateur
+
+### Groupes
+- `GET /api/v1/groups` - Liste des groupes
+- `GET /api/v1/groups/my-groups` - Mes groupes
+- `POST /api/v1/groups` - Créer un groupe
+- `POST /api/v1/groups/:id/add-member` - Ajouter un membre
+- `POST /api/v1/groups/:id/remove-member` - Retirer un membre
+
+### Localisations
+- `GET /api/v1/locations` - Liste des localisations
+- `GET /api/v1/locations/:geoId/children` - Enfants d'une localisation
+- `POST /api/v1/locations` - Créer une localisation
+- `PUT /api/v1/locations/:geoId` - Modifier une localisation
+
+### Notifications
+- `GET /api/v1/notifications` - Mes notifications
+- `PATCH /api/v1/notifications/:id/read` - Marquer comme lue
+
+## Hiérarchie des Rôles
+
+| Rôle | Niveau | Permissions |
+|------|--------|-------------|
+| Silver | 1 | Utilisateur de base |
+| Gold | 2 | Membre actif, peut s'inscrire aux gardes |
+| Platinum | 3 | Responsable de localisation |
+| Admin | 4 | Administrateur régional |
+| Admin_N1 | 5 | Super administrateur |
+
+## Format geo_id
+
+Le geo_id identifie une localisation de manière hiérarchique :
+
+```
+CC-PPP-ZZ-JJ-NN
+│  │   │  │  └── Numéro de local (01-99)
+│  │   │  └───── Numéro de juridiction (01-99)
+│  │   └──────── Code zone (01-99)
+│  └──────────── Code province/région (001-999)
+└─────────────── Code pays (01-99)
+
+Exemple: 02-033-04-01-01
+         │  │   │  │  └── Local #1
+         │  │   │  └───── Juridiction #1
+         │  │   └──────── Zone #4
+         │  └──────────── Province #33
+         └─────────────── Pays #2
+```
+
+## Technologies
+
+### Frontend
+- React 19
+- Vite 7
+- TailwindCSS 4
+- Zustand (state management)
+- React Query (data fetching)
+- React Hook Form + Zod (formulaires)
+- Radix UI / shadcn/ui (composants)
+
+### Backend
+- Express.js 4.18
+- Sequelize 6.35 (ORM)
+- SQLite (développement)
+- PostgreSQL (production)
+- JWT (authentification)
+- Argon2 (hachage mots de passe)
+- Winston (logging)
+
+## Sécurité
+
+- Authentification JWT avec access/refresh tokens
+- Hachage des mots de passe avec Argon2
+- Rate limiting sur les endpoints sensibles
+- Validation des entrées avec Joi
+- Headers de sécurité avec Helmet
+- CORS configuré
+
+## Prochaines Étapes
+
+Voir [TODOLIST-SHUGO-V7.md](TODOLIST-SHUGO-V7.md) pour la liste complète des tâches.
+
+**Priorités :**
+1. Stabiliser la connexion frontend/backend
+2. Compléter les fonctionnalités utilisateur
+3. Déployer le serveur central en production
+4. Développer le serveur local pour Raspberry Pi
+
+## Licence
+
+AGPL-3.0
 
 ---
 
-*SHUGO v7.0.0 - Système Hiérarchisé d'Utilisation et de Gestion Opérationnelle*
+*SHUGO v7.0.0 - Développé avec Claude Code*
