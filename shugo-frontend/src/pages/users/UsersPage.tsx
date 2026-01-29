@@ -11,7 +11,6 @@ import {
   Trash2,
   Shield,
   Mail,
-  Phone,
   UserCheck,
   UserX,
   Loader2,

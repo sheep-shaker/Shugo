@@ -64,7 +64,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           guardsToday,
           activeGuards: upcoming.filter(g => g.status === 'full').length,
           upcomingWeek: upcoming.length,
-          alertsCount: coverage.uncovered,
+          alertsCount: coverage.empty || 0,
         },
         recentGuards: upcoming.slice(0, 5),
         mySchedule: mySchedule.slice(0, 5),
@@ -91,7 +91,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
           guardsToday: upcoming.filter(g => g.guard_date === today).length,
           activeGuards: upcoming.filter(g => g.status === 'full').length,
           upcomingWeek: upcoming.length,
-          alertsCount: coverage.uncovered,
+          alertsCount: coverage.empty || 0,
         },
       }));
     } catch (error) {

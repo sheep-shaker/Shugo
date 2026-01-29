@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Mail, Lock, Shield, ArrowRight } from 'lucide-react';
-import { Button, Input, Card, Logo } from '@/components/ui';
+import { Button, Input, Card, Logo, LanguageSelector } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/lib/utils';
 
@@ -62,7 +62,12 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex relative">
+      {/* Language Selector */}
+      <div className="absolute top-6 right-6 z-50">
+        <LanguageSelector variant="default" />
+      </div>
+
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-gold-500 via-gold-600 to-gold-700 relative overflow-hidden">
         {/* Decorative patterns */}
@@ -272,11 +277,6 @@ export function LoginPage() {
               </Link>
             </p>
           </Card>
-
-          {/* Version */}
-          <p className="text-center text-xs text-gray-400 mt-6">
-            SHUGO v7.0 — Tous droits réservés
-          </p>
         </motion.div>
       </div>
     </div>

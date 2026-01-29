@@ -24,7 +24,7 @@ const authenticateToken = async (req, res, next) => {
         }
         
         // Verify token
-        jwt.verify(token, config.security.jwtSecret, async (err, decoded) => {
+        jwt.verify(token, config.jwt.secret, async (err, decoded) => {
             if (err) {
                 logger.warn('Invalid token attempt', {
                     ip: req.ip,
@@ -238,7 +238,7 @@ const optionalAuth = async (req, res, next) => {
     
     // Try to authenticate but don't fail if it doesn't work
     try {
-        const decoded = jwt.verify(token, config.security.jwtSecret);
+        const decoded = jwt.verify(token, config.jwt.secret);
         
         const user = await User.findByPk(decoded.member_id, {
             attributes: ['member_id', 'role', 'geo_id', 'status', 'scope']
@@ -326,7 +326,7 @@ const verify2FA = async (req, res, next) => {
     }
     
     // Check if 2FA is required
-    if (!config.security.require2FA) {
+    if (!config.features.twoFactorRequired) {
         return next();
     }
     

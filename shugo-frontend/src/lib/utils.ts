@@ -166,3 +166,84 @@ export function formatRelativeTime(date: Date | string): string {
   if (diffHours < 24) return `Il y a ${diffHours}h`;
   return `Il y a ${Math.round(diffHours / 24)}j`;
 }
+
+/**
+ * Role hierarchy for SHUGO
+ * Higher number = higher privileges
+ */
+export const ROLE_HIERARCHY = {
+  Silver: 1,
+  Gold: 2,
+  Platinum: 3,
+  Admin: 4,
+  Admin_N1: 5,
+} as const;
+
+export type UserRole = keyof typeof ROLE_HIERARCHY;
+
+/**
+ * Check if user has minimum required role
+ */
+export function hasMinimumRole(userRole: string | undefined, requiredRole: UserRole): boolean {
+  if (!userRole) return false;
+  const userLevel = ROLE_HIERARCHY[userRole as UserRole] || 0;
+  const requiredLevel = ROLE_HIERARCHY[requiredRole];
+  return userLevel >= requiredLevel;
+}
+
+/**
+ * Check if user has exact role
+ */
+export function hasRole(userRole: string | undefined, role: UserRole): boolean {
+  return userRole === role;
+}
+
+/**
+ * Check if user is admin (Admin or Admin_N1)
+ */
+export function isAdmin(userRole: string | undefined): boolean {
+  return hasMinimumRole(userRole, 'Admin');
+}
+
+/**
+ * Check if user can manage groups (Gold and above)
+ */
+export function canManageGroups(userRole: string | undefined): boolean {
+  return hasMinimumRole(userRole, 'Gold');
+}
+
+/**
+ * Check if user can create guards (Gold and above)
+ */
+export function canCreateGuards(userRole: string | undefined): boolean {
+  return hasMinimumRole(userRole, 'Gold');
+}
+
+/**
+ * Check if user can view all locations (Platinum and above)
+ */
+export function canViewAllLocations(userRole: string | undefined): boolean {
+  return hasMinimumRole(userRole, 'Platinum');
+}
+
+/**
+ * Check if user can manage users (Admin and above)
+ */
+export function canManageUsers(userRole: string | undefined): boolean {
+  return hasMinimumRole(userRole, 'Admin');
+}
+
+/**
+ * Get role-based dashboard features
+ */
+export function getDashboardFeatures(userRole: string | undefined) {
+  return {
+    canCreateGuards: canCreateGuards(userRole),
+    canManageGroups: canManageGroups(userRole),
+    canViewAllLocations: canViewAllLocations(userRole),
+    canManageUsers: canManageUsers(userRole),
+    canViewReports: hasMinimumRole(userRole, 'Gold'),
+    canViewStatistics: hasMinimumRole(userRole, 'Gold'),
+    canAccessAdmin: isAdmin(userRole),
+  };
+}

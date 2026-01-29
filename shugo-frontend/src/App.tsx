@@ -7,7 +7,7 @@ import { AnimatePresence } from 'framer-motion';
 import { AuthLayout, ProtectedRoute, DashboardLayout } from '@/components/layout';
 
 // Auth Pages
-import { LoginPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/auth';
+import { LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/auth';
 
 // Dashboard Pages
 import { DashboardPage } from '@/pages/dashboard';
@@ -27,6 +27,15 @@ import { SettingsPage } from '@/pages/settings';
 
 // Users Pages
 import { UsersPage } from '@/pages/users';
+
+// Groups Pages
+import { GroupsPage } from '@/pages/groups';
+
+// Admin Pages
+import { AdminPage } from '@/pages/admin';
+
+// Notifications Pages
+import { NotificationsPage } from '@/pages/notifications';
 
 // Placeholder pages (to be implemented)
 import { PlaceholderPage } from '@/pages/PlaceholderPage';
@@ -70,6 +79,7 @@ function AppContent() {
         {/* Public Routes - Auth */}
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
         </Route>
@@ -88,11 +98,12 @@ function AppContent() {
           <Route path="/locations" element={<LocationsPage />} />
           <Route path="/reports" element={<PlaceholderPage title="Rapports" />} />
           <Route path="/statistics" element={<PlaceholderPage title="Statistiques" />} />
+          <Route path="/groups" element={<GroupsPage />} />
           <Route path="/users" element={<UsersPage />} />
-          <Route path="/admin" element={<PlaceholderPage title="Administration" />} />
+          <Route path="/admin" element={<AdminPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/notifications" element={<PlaceholderPage title="Notifications" />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
         </Route>
 
         {/* Unauthorized Page */}

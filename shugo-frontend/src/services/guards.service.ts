@@ -62,11 +62,13 @@ interface GuardsCountResponse {
 }
 
 interface CoverageStats {
-  total_guards: number;
-  fully_covered: number;
-  partially_covered: number;
-  uncovered: number;
-  coverage_rate: number;
+  total: number;
+  covered: number;
+  partial: number;
+  empty: number;
+  cancelled: number;
+  byDay: Record<string, { total: number; covered: number; partial: number; empty: number }>;
+  coverageRate: number;
 }
 
 interface CoverageStatsResponse {

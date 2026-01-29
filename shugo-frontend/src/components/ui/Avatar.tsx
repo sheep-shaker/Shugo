@@ -68,12 +68,47 @@ Avatar.displayName = 'Avatar';
 
 // Avatar Group for stacking avatars
 interface AvatarGroupProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  users?: Array<{ name: string; avatar?: string }>;
   max?: number;
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   className?: string;
 }
 
-function AvatarGroup({ children, max = 4, className }: AvatarGroupProps) {
+function AvatarGroup({ children, users, max = 4, size = 'sm', className }: AvatarGroupProps) {
+  // Support users prop for easier usage
+  if (users && users.length > 0) {
+    const visibleUsers = users.slice(0, max);
+    const remainingCount = users.length - max;
+
+    return (
+      <div className={cn('flex -space-x-2', className)}>
+        {visibleUsers.map((user, index) => (
+          <Avatar
+            key={index}
+            src={user.avatar}
+            name={user.name}
+            size={size}
+            className="ring-2 ring-white"
+          />
+        ))}
+        {remainingCount > 0 && (
+          <div
+            className={cn(
+              'flex items-center justify-center rounded-full',
+              'bg-marble-200 text-xs font-medium text-gray-600',
+              'ring-2 ring-white',
+              size === 'sm' ? 'h-8 w-8' : size === 'xs' ? 'h-6 w-6' : 'h-10 w-10'
+            )}
+          >
+            +{remainingCount}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Support children prop for flexibility
   const childArray = Array.isArray(children) ? children : [children];
   const visibleAvatars = childArray.slice(0, max);
   const remainingCount = childArray.length - max;

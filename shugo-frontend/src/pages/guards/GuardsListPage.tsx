@@ -16,11 +16,13 @@ import {
   CheckCircle,
   Loader2,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge } from '@/components/ui';
-import { cn, formatDate, formatTime, formatGuardStatus } from '@/lib/utils';
+import { cn, formatDate, formatGuardStatus } from '@/lib/utils';
 import { useGuardsStore } from '@/stores/guardsStore';
-import type { Guard } from '@/services/guards.service';
 
 // Animation variants
 const containerVariants = {
@@ -37,13 +39,110 @@ const itemVariants = {
 };
 
 type FilterStatus = 'all' | 'open' | 'full' | 'closed' | 'cancelled';
+type ViewMode = 'day' | 'week' | 'month';
 
 export function GuardsListPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('month');
+  const [showActivities, setShowActivities] = useState(false);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  const { guards, isLoading, error, pagination, fetchGuards, cancelGuard } = useGuardsStore();
+  const { guards, isLoading, error, pagination, fetchGuards, cancelGuard: _cancelGuard } = useGuardsStore();
+
+  // Calendar helpers
+  const getDaysInMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+  };
+
+  const getMonthName = (date: Date) => {
+    return date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  };
+
+  const previousMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1));
+  };
+
+  const nextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1));
+  };
+
+  const renderCalendar = (monthOffset: number = 0) => {
+    const displayDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + monthOffset);
+    const daysInMonth = getDaysInMonth(displayDate);
+    const firstDay = getFirstDayOfMonth(displayDate);
+    const days = [];
+
+    // Empty cells for days before month starts (adjusted for Monday start)
+    const adjustedFirstDay = firstDay === 0 ? 6 : firstDay - 1;
+    for (let i = 0; i < adjustedFirstDay; i++) {
+      days.push(<div key={`empty-${i}`} className="h-24 border border-marble-100" />);
+    }
+
+    // Days of the month
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(displayDate.getFullYear(), displayDate.getMonth(), day);
+      const isToday = date.toDateString() === new Date().toDateString();
+      const isSelected = selectedDate?.toDateString() === date.toDateString();
+      // TODO: Replace with actual guard/activity data
+      const hasGuard = Math.random() > 0.7;
+      const hasActivity = Math.random() > 0.6;
+
+      days.push(
+        <div
+          key={day}
+          onClick={() => setSelectedDate(date)}
+          className={cn(
+            'h-24 border border-marble-100 p-2 hover:bg-marble-50 transition-colors cursor-pointer',
+            isToday && 'bg-gold-50 border-gold-300',
+            isSelected && 'bg-gold-100 border-gold-400 shadow-md'
+          )}
+        >
+          <div className={cn(
+            'text-sm font-medium mb-1',
+            isToday ? 'text-gold-700' : 'text-gray-900',
+            isSelected && 'text-gold-800'
+          )}>
+            {day}
+          </div>
+          <div className="space-y-1">
+            {hasGuard && (
+              <div className="text-xs bg-gold-500 text-white px-1.5 py-0.5 rounded truncate">
+                Garde 14h-17h
+              </div>
+            )}
+            {showActivities && hasActivity && (
+              <div className="text-xs bg-blue-500 text-white px-1.5 py-0.5 rounded truncate">
+                Activité 10h
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <h3 className="font-semibold text-gray-900 mb-3 capitalize">
+          {getMonthName(displayDate)}
+        </h3>
+        <div className="grid grid-cols-7 gap-0">
+          {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((day) => (
+            <div key={day} className="text-center text-xs font-semibold text-gray-500 p-2 bg-marble-50 border border-marble-100">
+              {day}
+            </div>
+          ))}
+          {days}
+        </div>
+      </div>
+    );
+  };
 
   useEffect(() => {
     fetchGuards({ limit: 50 });
@@ -101,6 +200,181 @@ export function GuardsListPage() {
           </Button>
         </div>
       </motion.div>
+
+      {/* View Mode & Filters */}
+      <motion.div variants={itemVariants}>
+        <Card variant="default" padding="md">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            {/* View Mode Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600 mr-2">Vue:</span>
+              {[
+                { value: 'day', label: 'Jour' },
+                { value: 'week', label: 'Semaine' },
+                { value: 'month', label: 'Mois' },
+              ].map((mode) => (
+                <button
+                  key={mode.value}
+                  onClick={() => setViewMode(mode.value as ViewMode)}
+                  className={cn(
+                    'px-4 py-2 rounded-xl text-sm font-medium transition-all',
+                    viewMode === mode.value
+                      ? 'bg-gold-500 text-white shadow-gold'
+                      : 'bg-marble-100 text-gray-600 hover:bg-marble-200'
+                  )}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Activity Overlay Toggle */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowActivities(!showActivities)}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
+                  showActivities
+                    ? 'bg-blue-500 text-white shadow-blue'
+                    : 'bg-marble-100 text-gray-600 hover:bg-marble-200'
+                )}
+              >
+                <Layers className="h-4 w-4" />
+                {showActivities ? 'Masquer' : 'Afficher'} les activités
+              </button>
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Calendar View - 2 Months */}
+      {viewMode === 'month' && (
+        <motion.div variants={itemVariants}>
+          <Card variant="elevated">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-gold-500" />
+                Calendrier des gardes
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={previousMonth}
+                  className="p-2 rounded-lg hover:bg-marble-100 transition-colors"
+                >
+                  <ChevronLeft className="h-5 w-5 text-gray-600" />
+                </button>
+                <button
+                  onClick={nextMonth}
+                  className="p-2 rounded-lg hover:bg-marble-100 transition-colors"
+                >
+                  <ChevronRight className="h-5 w-5 text-gray-600" />
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {renderCalendar(0)}
+                {renderCalendar(1)}
+              </div>
+              <div className="flex items-center justify-center gap-6 mt-6 pt-4 border-t border-marble-200">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-gold-500 rounded"></div>
+                  <span className="text-sm text-gray-600">Gardes</span>
+                </div>
+                {showActivities && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded"></div>
+                    <span className="text-sm text-gray-600">Activités</span>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Selected Date Details */}
+      {selectedDate && viewMode === 'month' && (
+        <motion.div variants={itemVariants}>
+          <Card variant="elevated">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-gold-500" />
+                Détails du {selectedDate.toLocaleDateString('fr-FR', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric'
+                })}
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedDate(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                Fermer
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* TODO: Replace with actual guards for this date */}
+                <div className="p-4 border border-marble-200 rounded-xl">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 bg-gold-100 rounded-xl flex items-center justify-center">
+                      <Shield className="h-5 w-5 text-gold-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">Garde Centre-Ville</p>
+                      <p className="text-sm text-gray-500">14h00 - 17h00</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-gray-500">
+                    <span className="flex items-center gap-1">
+                      <MapPin className="h-4 w-4" />
+                      Nice Centre
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Users className="h-4 w-4" />
+                      3/5 agents
+                    </span>
+                  </div>
+                </div>
+                {showActivities && (
+                  <div className="p-4 border border-blue-200 bg-blue-50 rounded-xl">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                        <Calendar className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">Formation sécurité</p>
+                        <p className="text-sm text-gray-500">10h00 - 12h00</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-4 w-4" />
+                        Salle de formation
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {/* Empty state when no events */}
+                {Math.random() > 0.5 && (
+                  <div className="p-8 text-center text-gray-500">
+                    <Calendar className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                    <p>Aucune garde ou activité prévue pour cette date</p>
+                    <Button variant="secondary" size="sm" className="mt-4">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Planifier une garde
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Stats Cards */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 lg:grid-cols-4 gap-4">

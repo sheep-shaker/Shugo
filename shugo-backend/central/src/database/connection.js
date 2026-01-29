@@ -117,20 +117,19 @@ async function initializeDatabase() {
 // Sync all models
 async function syncModels(options = {}) {
     try {
-        // Import all models to register them
+        // Import all models to register them (Central Server models only)
         const models = [
             require('../models/User'),
             require('../models/Location'),
             require('../models/LocalInstance'),
             require('../models/Session'),
             require('../models/AuditLog'),
-            require('../models/Guard'),
-            require('../models/GuardAssignment'),
             require('../models/Group'),
             require('../models/GroupMembership'),
             require('../models/Notification'),
             require('../models/RegistrationToken')
         ];
+        // Note: Guard-related models are managed by Local Server
         
         // Create associations
         setupAssociations();
@@ -147,7 +146,11 @@ async function syncModels(options = {}) {
 }
 
 // Setup model associations
+let associationsConfigured = false;
 function setupAssociations() {
+    if (associationsConfigured) {
+        return; // Already configured
+    }
     const models = sequelize.models;
     
     // User associations
@@ -241,6 +244,7 @@ function setupAssociations() {
         });
     }
     
+    associationsConfigured = true;
     logger.debug('Model associations configured');
 }
 
@@ -305,12 +309,38 @@ const dbUtils = {
     }
 };
 
+// Load models immediately to populate sequelize.models
+function loadModels() {
+    // Core models for Central Server
+    require('../models/User');
+    require('../models/Location');
+    require('../models/LocalInstance');
+    require('../models/Session');
+    require('../models/AuditLog');
+    require('../models/Group');
+    require('../models/GroupMembership');
+    require('../models/Notification');
+    require('../models/RegistrationToken');
+
+    // Note: Guard-related models (Guard, GuardAssignment, GuardSlot, GuardScenario, WaitingList)
+    // are managed by the Local Server, not the Central Server
+
+    // Setup associations
+    setupAssociations();
+
+    logger.debug('Models loaded and associations configured');
+}
+
+// Note: Models are loaded when syncModels() is called during server startup
+// Do NOT call loadModels() here to avoid circular dependency issues
+
 module.exports = {
     sequelize,
     testConnection,
     initializeDatabase,
     syncModels,
     setupAssociations,
+    loadModels,
     dbUtils,
     Sequelize
 };

@@ -5,6 +5,7 @@ export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, 
 export { Badge, badgeVariants } from './Badge';
 export { Avatar, AvatarGroup, avatarVariants } from './Avatar';
 export { Logo, LogoIcon } from './Logo';
+export { LanguageSelector } from './LanguageSelector';
 
 // Types
 export type { ButtonProps } from './Button';

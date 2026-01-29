@@ -584,6 +584,178 @@ router.post('/:id/transfer-leadership',
 );
 
 /**
+ * @route   GET /api/v1/groups/:id/children
+ * @desc    Obtenir les sous-groupes d'un groupe parent
+ * @access  Authenticated
+ */
+router.get('/:id/children',
+    authenticateToken,
+    param('id').isUUID(),
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const children = await Group.findAll({
+                where: {
+                    parent_group_id: req.params.id,
+                    status: 'active'
+                },
+                include: [{
+                    model: User,
+                    as: 'leader',
+                    attributes: ['member_id', 'first_name_hash', 'last_name_hash', 'role']
+                }],
+                order: [['name', 'ASC']]
+            });
+
+            // Ajouter les statistiques pour chaque enfant
+            const childrenWithStats = await Promise.all(
+                children.map(async (child) => {
+                    const members_count = await GroupMembership.count({
+                        where: {
+                            group_id: child.group_id,
+                            is_active: true
+                        }
+                    });
+
+                    // TODO: Récupérer le nombre de gardes actives
+                    const active_guards = 0;
+
+                    return {
+                        ...child.toJSON(),
+                        members_count,
+                        active_guards
+                    };
+                })
+            );
+
+            res.json({
+                success: true,
+                data: childrenWithStats
+            });
+
+        } catch (error) {
+            logger.error('Error fetching group children', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching group children',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * @route   GET /api/v1/groups/:id/stats
+ * @desc    Obtenir les statistiques d'un groupe
+ * @access  Authenticated
+ */
+router.get('/:id/stats',
+    authenticateToken,
+    param('id').isUUID(),
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const group = await Group.findByPk(req.params.id);
+
+            if (!group) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Group not found'
+                });
+            }
+
+            // Compter les membres actifs
+            const members_count = await GroupMembership.count({
+                where: {
+                    group_id: req.params.id,
+                    is_active: true
+                }
+            });
+
+            // TODO: Compter les gardes actives du groupe
+            const active_guards = 0;
+            const total_guards = 0;
+
+            // Compter les sous-groupes
+            const children_count = await Group.count({
+                where: {
+                    parent_group_id: req.params.id,
+                    status: 'active'
+                }
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    members_count,
+                    active_guards,
+                    total_guards,
+                    children_count
+                }
+            });
+
+        } catch (error) {
+            logger.error('Error fetching group stats', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching group stats',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * @route   PATCH /api/v1/groups/:id/toggle
+ * @desc    Activer/désactiver un groupe
+ * @access  Platinum+
+ */
+router.patch('/:id/toggle',
+    authenticateToken,
+    checkRole(['Platinum', 'Admin', 'Admin_N1']),
+    [
+        param('id').isUUID(),
+        body('is_active').isBoolean()
+    ],
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const group = await Group.findByPk(req.params.id);
+
+            if (!group) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Group not found'
+                });
+            }
+
+            const newStatus = req.body.is_active ? 'active' : 'inactive';
+            await group.update({ status: newStatus });
+
+            logger.info('Group status toggled', {
+                groupId: group.group_id,
+                status: newStatus,
+                toggledBy: req.user.member_id
+            });
+
+            res.json({
+                success: true,
+                message: `Group ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`,
+                data: group
+            });
+
+        } catch (error) {
+            logger.error('Error toggling group status', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error toggling group status',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
  * @route   DELETE /api/v1/groups/:id
  * @desc    Archiver un groupe
  * @access  Platinum+
@@ -596,26 +768,26 @@ router.delete('/:id',
     async (req, res) => {
         try {
             const group = await Group.findByPk(req.params.id);
-            
+
             if (!group) {
                 return res.status(404).json({
                     success: false,
                     message: 'Group not found'
                 });
             }
-            
+
             await group.archive();
-            
+
             logger.warn('Group archived', {
                 groupId: group.group_id,
                 archivedBy: req.user.member_id
             });
-            
+
             res.json({
                 success: true,
                 message: 'Group archived successfully'
             });
-            
+
         } catch (error) {
             logger.error('Error archiving group', { error: error.message });
             res.status(500).json({

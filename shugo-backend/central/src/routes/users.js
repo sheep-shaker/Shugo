@@ -95,6 +95,100 @@ router.get('/',
 );
 
 /**
+ * POST /api/v1/users
+ * Create a new user (admin only)
+ */
+router.post('/',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1']),
+    asyncHandler(async (req, res) => {
+        const {
+            email,
+            password,
+            first_name,
+            last_name,
+            role = 'Silver',
+            geo_id,
+            phone,
+            preferred_language = 'fr',
+            notification_channel = 'email'
+        } = req.body;
+
+        // Validate required fields
+        if (!email || !password || !first_name || !last_name || !geo_id) {
+            throw new AppError('Missing required fields: email, password, first_name, last_name, geo_id', 400);
+        }
+
+        // Check if email already exists
+        const existingUser = await User.findByEmail(email);
+        if (existingUser) {
+            throw new AppError('Email already registered', 409);
+        }
+
+        // Validate role permissions
+        if (role === 'Admin_N1' && req.user.role !== 'Admin_N1') {
+            throw new AppError('Only Admin_N1 can create Admin_N1 users', 403);
+        }
+
+        // Generate member_id
+        const memberId = await User.getNextAvailableId();
+
+        // Hash password
+        const passwordHash = await cryptoManager.hashPassword(password);
+
+        // Create user
+        const user = await User.create({
+            member_id: memberId,
+            email_encrypted: email,
+            password_hash: passwordHash,
+            first_name_encrypted: first_name,
+            last_name_encrypted: last_name,
+            phone_encrypted: phone || null,
+            role,
+            geo_id,
+            scope: 'local:' + geo_id,
+            status: 'active',
+            preferred_language,
+            notification_channel,
+            totp_enabled: false
+        });
+
+        // Log the creation
+        await AuditLog.logAction({
+            member_id: req.user.member_id,
+            action: 'CREATE',
+            resource_type: 'user',
+            resource_id: user.member_id.toString(),
+            new_values: { email, first_name, last_name, role, geo_id },
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'admin'
+        });
+
+        logger.info('New user created by admin', {
+            newUserId: user.member_id,
+            createdBy: req.user.member_id,
+            role: role
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'User created successfully',
+            data: {
+                member_id: user.member_id,
+                email: email,
+                first_name: first_name,
+                last_name: last_name,
+                role: user.role,
+                geo_id: user.geo_id,
+                status: user.status
+            }
+        });
+    })
+);
+
+/**
  * GET /api/v1/users/:id
  * Get user by ID
  */

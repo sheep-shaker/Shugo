@@ -232,14 +232,14 @@ router.post('/login',
                 role: user.role,
                 geo_id: user.geo_id
             },
-            config.security.jwtSecret,
-            { expiresIn: config.security.jwtExpiresIn }
+            config.jwt.secret,
+            { expiresIn: config.jwt.accessExpiresIn }
         );
         
         const refreshToken = jwt.sign(
             { member_id: user.member_id },
-            config.security.jwtRefreshSecret,
-            { expiresIn: config.security.jwtRefreshExpiresIn }
+            config.jwt.refreshSecret,
+            { expiresIn: config.jwt.refreshExpiresIn }
         );
         
         // Create session
@@ -272,7 +272,7 @@ router.post('/login',
             data: {
                 access_token: accessToken,
                 refresh_token: refreshToken,
-                expires_in: config.security.jwtExpiresIn,
+                expires_in: config.jwt.accessExpiresIn,
                 user: {
                     member_id: user.member_id,
                     first_name: user.first_name_encrypted,
@@ -351,8 +351,8 @@ router.post('/refresh',
                 role: user.role,
                 geo_id: user.geo_id
             },
-            config.security.jwtSecret,
-            { expiresIn: config.security.jwtExpiresIn }
+            config.jwt.secret,
+            { expiresIn: config.jwt.accessExpiresIn }
         );
         
         // Update session
@@ -364,7 +364,7 @@ router.post('/refresh',
             success: true,
             data: {
                 access_token: accessToken,
-                expires_in: config.security.jwtExpiresIn
+                expires_in: config.jwt.accessExpiresIn
             }
         });
     })

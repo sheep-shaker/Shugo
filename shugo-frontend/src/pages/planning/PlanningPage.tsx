@@ -54,7 +54,7 @@ const guardToCalendarEvent = (guard: Guard): CalendarEvent => {
     location: guard.geo_id,
     start: new Date(guardDate.getFullYear(), guardDate.getMonth(), guardDate.getDate(), startHour, startMin),
     end: new Date(guardDate.getFullYear(), guardDate.getMonth(), guardDate.getDate(), endHour, endMin),
-    type: guard.guard_type === 'training' ? 'training' : 'guard',
+    type: 'guard' as const,
     status: guard.status === 'full' ? 'confirmed' : guard.status === 'open' ? 'pending' : 'completed',
     agents: guard.current_participants,
     maxAgents: guard.max_participants,
@@ -82,8 +82,8 @@ export function PlanningPage() {
     const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
 
     fetchGuards({
-      startDate,
-      endDate,
+      start_date: startDate,
+      end_date: endDate,
       limit: 100,
     });
   }, [currentDate, fetchGuards]);

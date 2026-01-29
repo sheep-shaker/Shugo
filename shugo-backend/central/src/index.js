@@ -13,7 +13,10 @@ const swaggerUi = require('swagger-ui-express');
 // Configuration et utilities
 const config = require('./config');
 const logger = require('./utils/logger');
-const { sequelize, testConnection, syncModels } = require('./database/connection');
+const { sequelize, testConnection, syncModels, loadModels } = require('./database/connection');
+
+// Load models immediately so they're available for routes
+loadModels();
 
 // Middleware
 const { errorHandler } = require('./middleware/errorHandler');
@@ -90,7 +93,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Documentation (Swagger UI)
-if (config.isDevelopment || process.env.ENABLE_SWAGGER === 'true') {
+if (config.isDev || process.env.ENABLE_SWAGGER === 'true') {
     const { swaggerSpec, swaggerUiOptions } = require('./docs/swagger');
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
     app.get('/api-docs.json', (req, res) => res.json(swaggerSpec));
@@ -102,6 +105,7 @@ app.use('/api/v1/auth', require('./routes/auth'));
 app.use('/api/v1/users', require('./routes/users'));
 app.use('/api/v1/guards', require('./routes/guards'));
 app.use('/api/v1/groups', require('./routes/groups'));
+app.use('/api/v1/locations', require('./routes/locations'));
 app.use('/api/v1/notifications', require('./routes/notifications'));
 app.use('/api/v1/health', require('./routes/health'));
 
@@ -151,8 +155,9 @@ async function startServer() {
         logger.success('✅ Database connected');
         
         // Sync database models (in development only)
-        if (config.isDevelopment) {
-            await syncModels({ alter: true });
+        if (config.isDev) {
+            // Use force:false to only create missing tables without altering existing ones
+            await syncModels({ force: false });
             logger.info('📊 Database models synchronized');
         }
         

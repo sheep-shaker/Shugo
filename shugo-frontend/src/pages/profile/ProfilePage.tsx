@@ -17,7 +17,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge, Avatar } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { useGuardsStore } from '@/stores/guardsStore';
-import { getFullName, formatRole, formatDate, formatRelativeTime } from '@/lib/utils';
+import { getFullName, formatRole, formatDate } from '@/lib/utils';
 
 // Animation variants
 const containerVariants = {
