@@ -1185,6 +1185,177 @@ class GuardError extends Error {
   }
 }
 
+// =========================================
+// MÉTHODES STATIQUES POUR COMPATIBILITÉ ROUTES
+// =========================================
+
+/**
+ * Instance singleton (initialisée au premier appel)
+ */
+let _instance = null;
+
+/**
+ * Obtenir l'instance singleton du service
+ */
+GuardService.getInstance = function() {
+  if (!_instance) {
+    const { sequelize, setupAssociations } = require('../database/connection');
+    const models = sequelize.models;
+    // S'assurer que les associations sont configurées
+    if (models.Guard && models.GuardAssignment && !models.Guard.associations.assignments) {
+      setupAssociations();
+    }
+    _instance = new GuardService(models, sequelize);
+  }
+  return _instance;
+};
+
+/**
+ * Récupère le planning d'un membre
+ * @static
+ */
+GuardService.getMemberSchedule = async function(memberId, startDate, endDate) {
+  const instance = GuardService.getInstance();
+  const { Guard, GuardAssignment } = instance.models;
+
+  const assignments = await GuardAssignment.findAll({
+    where: {
+      member_id: memberId,
+      status: 'confirmed'
+    },
+    include: [{
+      model: Guard,
+      as: 'guard',
+      where: {
+        guard_date: { [Op.between]: [startDate, endDate] },
+        status: { [Op.ne]: 'cancelled' }
+      }
+    }],
+    order: [[{ model: Guard, as: 'guard' }, 'guard_date', 'ASC']]
+  });
+
+  return assignments.map(a => ({
+    assignment_id: a.assignment_id,
+    guard_id: a.guard_id,
+    status: a.status,
+    guard: a.guard ? {
+      guard_id: a.guard.guard_id,
+      guard_date: a.guard.guard_date,
+      start_time: a.guard.start_time,
+      end_time: a.guard.end_time,
+      guard_type: a.guard.guard_type,
+      geo_id: a.guard.geo_id,
+      description: a.guard.description,
+      status: a.guard.status
+    } : null
+  }));
+};
+
+/**
+ * Récupère les gardes vides
+ * @static
+ */
+GuardService.getEmptyGuards = async function(geoId, days = 7) {
+  const instance = GuardService.getInstance();
+  return instance.getEmptySlots(geoId, days);
+};
+
+/**
+ * Récupère les statistiques de couverture
+ * @static
+ */
+GuardService.getCoverageStatistics = async function(geoId, startDate, endDate) {
+  const instance = GuardService.getInstance();
+  return instance.getCoverageSummary(geoId, startDate, endDate);
+};
+
+/**
+ * Crée une garde
+ * @static
+ */
+GuardService.createGuard = async function(data, memberId) {
+  const instance = GuardService.getInstance();
+  return instance.create({
+    geoId: data.geo_id,
+    guardDate: data.guard_date,
+    startTime: data.start_time,
+    endTime: data.end_time,
+    guardType: data.guard_type,
+    maxParticipants: data.max_participants,
+    minParticipants: data.min_participants,
+    description: data.description,
+    requirements: data.requirements,
+    scenarioId: data.scenario_id,
+    priority: data.priority
+  }, memberId);
+};
+
+/**
+ * Assigne un membre à une garde
+ * @static
+ */
+GuardService.assignMember = async function(guardId, memberId, assignedBy, notes) {
+  const instance = GuardService.getInstance();
+  return instance.register(guardId, memberId, assignedBy, { notes });
+};
+
+/**
+ * Annule une assignation
+ * @static
+ */
+GuardService.cancelAssignment = async function(assignmentId, reason, replacementMemberId) {
+  const instance = GuardService.getInstance();
+  const { GuardAssignment } = instance.models;
+
+  const assignment = await GuardAssignment.findByPk(assignmentId);
+  if (!assignment) {
+    throw new GuardError('ASSIGNMENT_NOT_FOUND', 'Assignation non trouvée');
+  }
+
+  return instance.cancel(assignment.guard_id, assignment.member_id, assignment.member_id, {
+    reason,
+    replacementMemberId
+  });
+};
+
+/**
+ * Génère des gardes depuis un scénario
+ * @static
+ */
+GuardService.generateFromScenario = async function(scenarioId, startDate, endDate, geoId) {
+  const instance = GuardService.getInstance();
+  // Si pas de scenarioId, utiliser un scénario par défaut ou générer manuellement
+  if (scenarioId) {
+    return instance.createFromScenario(scenarioId, startDate, endDate, instance.models.User.findByPk(1));
+  }
+  // Générer un planning par défaut (du lundi au vendredi, 08:00-18:00)
+  const guards = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dayOfWeek = d.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) continue; // Skip weekends
+
+    try {
+      const guard = await instance.create({
+        geoId: geoId,
+        guardDate: d.toISOString().split('T')[0],
+        startTime: '08:00:00',
+        endTime: '18:00:00',
+        guardType: 'standard',
+        maxParticipants: 2,
+        minParticipants: 1
+      }, 1);
+      guards.push(guard);
+    } catch (err) {
+      if (err.code !== 'OVERLAP') console.error('Error creating guard:', err);
+    }
+  }
+
+  return guards;
+};
+
 module.exports = GuardService;
 module.exports.GuardError = GuardError;
 module.exports.CANCELLATION_TYPES = CANCELLATION_TYPES;

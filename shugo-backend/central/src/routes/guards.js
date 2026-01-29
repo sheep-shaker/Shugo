@@ -5,8 +5,7 @@ const router = require('express').Router();
 const { body, param, query, validationResult } = require('express-validator');
 const { authenticateToken, checkRole, checkScope } = require('../middleware/auth');
 const GuardService = require('../services/GuardService');
-const Guard = require('../models/Guard');
-const GuardAssignment = require('../models/GuardAssignment');
+const { sequelize } = require('../database/connection');
 const logger = require('../utils/logger');
 const { Op } = require('sequelize');
 
@@ -14,9 +13,9 @@ const { Op } = require('sequelize');
 const handleValidationErrors = (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        return res.status(400).json({ 
-            success: false, 
-            errors: errors.array() 
+        return res.status(400).json({
+            success: false,
+            errors: errors.array()
         });
     }
     next();
@@ -41,6 +40,7 @@ router.get('/',
     handleValidationErrors,
     async (req, res) => {
         try {
+            const { Guard, GuardAssignment } = sequelize.models;
             const {
                 geo_id,
                 start_date,
@@ -50,16 +50,16 @@ router.get('/',
                 page = 1,
                 limit = 20
             } = req.query;
-            
+
             const where = {};
-            
+
             // Filtrer par geo_id selon le scope de l'utilisateur
             if (geo_id) {
                 where.geo_id = geo_id;
             } else if (req.user.scope && req.user.scope.startsWith('local:')) {
                 where.geo_id = req.user.scope.replace('local:', '');
             }
-            
+
             if (start_date && end_date) {
                 where.guard_date = {
                     [Op.between]: [start_date, end_date]
@@ -73,12 +73,12 @@ router.get('/',
                     [Op.lte]: end_date
                 };
             }
-            
+
             if (status) where.status = status;
             if (type) where.guard_type = type;
-            
+
             const offset = (page - 1) * limit;
-            
+
             const { count, rows } = await Guard.findAndCountAll({
                 where,
                 limit,
@@ -86,11 +86,12 @@ router.get('/',
                 order: [['guard_date', 'ASC'], ['start_time', 'ASC']],
                 include: [{
                     model: GuardAssignment,
+                    as: 'assignments',
                     where: { status: 'confirmed' },
                     required: false
                 }]
             });
-            
+
             res.json({
                 success: true,
                 data: rows,
@@ -101,7 +102,7 @@ router.get('/',
                     limit: parseInt(limit)
                 }
             });
-            
+
         } catch (error) {
             logger.error('Error fetching guards', { error: error.message });
             res.status(500).json({
@@ -122,20 +123,21 @@ router.get('/upcoming',
     authenticateToken,
     async (req, res) => {
         try {
+            const { Guard } = sequelize.models;
             const days = parseInt(req.query.days) || 7;
-            const geoId = req.query.geo_id || 
-                (req.user.scope && req.user.scope.startsWith('local:') 
-                    ? req.user.scope.replace('local:', '') 
+            const geoId = req.query.geo_id ||
+                (req.user.scope && req.user.scope.startsWith('local:')
+                    ? req.user.scope.replace('local:', '')
                     : null);
-            
+
             const guards = await Guard.findUpcoming(days, geoId);
-            
+
             res.json({
                 success: true,
                 data: guards,
                 count: guards.length
             });
-            
+
         } catch (error) {
             logger.error('Error fetching upcoming guards', { error: error.message });
             res.status(500).json({
@@ -158,19 +160,19 @@ router.get('/empty',
     async (req, res) => {
         try {
             const days = parseInt(req.query.days) || 7;
-            const geoId = req.query.geo_id || 
-                (req.user.scope && req.user.scope.startsWith('local:') 
-                    ? req.user.scope.replace('local:', '') 
+            const geoId = req.query.geo_id ||
+                (req.user.scope && req.user.scope.startsWith('local:')
+                    ? req.user.scope.replace('local:', '')
                     : null);
-            
+
             const guards = await GuardService.getEmptyGuards(geoId, days);
-            
+
             res.json({
                 success: true,
                 data: guards,
                 count: guards.length
             });
-            
+
         } catch (error) {
             logger.error('Error fetching empty guards', { error: error.message });
             res.status(500).json({
@@ -192,20 +194,21 @@ router.get('/critical',
     checkRole(['Platinum', 'Admin', 'Admin_N1']),
     async (req, res) => {
         try {
+            const { Guard } = sequelize.models;
             const hours = parseInt(req.query.hours) || 72;
-            const geoId = req.query.geo_id || 
-                (req.user.scope && req.user.scope.startsWith('local:') 
-                    ? req.user.scope.replace('local:', '') 
+            const geoId = req.query.geo_id ||
+                (req.user.scope && req.user.scope.startsWith('local:')
+                    ? req.user.scope.replace('local:', '')
                     : null);
-            
+
             const guards = await Guard.findCritical(hours, geoId);
-            
+
             res.json({
                 success: true,
                 data: guards,
                 count: guards.length
             });
-            
+
         } catch (error) {
             logger.error('Error fetching critical guards', { error: error.message });
             res.status(500).json({
@@ -227,21 +230,21 @@ router.get('/my-schedule',
     async (req, res) => {
         try {
             const startDate = req.query.start_date || new Date().toISOString().split('T')[0];
-            const endDate = req.query.end_date || 
+            const endDate = req.query.end_date ||
                 new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-            
+
             const schedule = await GuardService.getMemberSchedule(
                 req.user.member_id,
                 startDate,
                 endDate
             );
-            
+
             res.json({
                 success: true,
                 data: schedule,
                 count: schedule.length
             });
-            
+
         } catch (error) {
             logger.error('Error fetching member schedule', { error: error.message });
             res.status(500).json({
@@ -265,20 +268,20 @@ router.get('/coverage-stats',
         try {
             const geoId = req.query.geo_id || req.user.geo_id;
             const startDate = req.query.start_date || new Date().toISOString().split('T')[0];
-            const endDate = req.query.end_date || 
+            const endDate = req.query.end_date ||
                 new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-            
+
             const stats = await GuardService.getCoverageStatistics(
                 geoId,
                 startDate,
                 endDate
             );
-            
+
             res.json({
                 success: true,
                 data: stats
             });
-            
+
         } catch (error) {
             logger.error('Error fetching coverage statistics', { error: error.message });
             res.status(500).json({
@@ -301,30 +304,33 @@ router.get('/:id',
     handleValidationErrors,
     async (req, res) => {
         try {
+            const { Guard, GuardAssignment, User } = sequelize.models;
             const guard = await Guard.findByPk(req.params.id, {
                 include: [{
                     model: GuardAssignment,
+                    as: 'assignments',
                     where: { status: 'confirmed' },
                     required: false,
                     include: [{
-                        model: require('../models/User'),
-                        attributes: ['member_id', 'first_name_hash', 'last_name_hash', 'role']
+                        model: User,
+                        as: 'member',
+                        attributes: ['member_id', 'role']
                     }]
                 }]
             });
-            
+
             if (!guard) {
                 return res.status(404).json({
                     success: false,
                     message: 'Guard not found'
                 });
             }
-            
+
             res.json({
                 success: true,
                 data: guard
             });
-            
+
         } catch (error) {
             logger.error('Error fetching guard', { error: error.message });
             res.status(500).json({
@@ -338,7 +344,7 @@ router.get('/:id',
 
 /**
  * @route   POST /api/v1/guards
- * @desc    Créer une nouvelle garde
+ * @desc    Creer une nouvelle garde
  * @access  Platinum+
  */
 router.post('/',
@@ -362,18 +368,18 @@ router.post('/',
                 req.body,
                 req.user.member_id
             );
-            
+
             logger.info('Guard created', {
                 guardId: guard.guard_id,
                 createdBy: req.user.member_id
             });
-            
+
             res.status(201).json({
                 success: true,
                 message: 'Guard created successfully',
                 data: guard
             });
-            
+
         } catch (error) {
             logger.error('Error creating guard', { error: error.message });
             res.status(500).json({
@@ -397,28 +403,29 @@ router.put('/:id',
     handleValidationErrors,
     async (req, res) => {
         try {
+            const { Guard } = sequelize.models;
             const guard = await Guard.findByPk(req.params.id);
-            
+
             if (!guard) {
                 return res.status(404).json({
                     success: false,
                     message: 'Guard not found'
                 });
             }
-            
+
             await guard.update(req.body);
-            
+
             logger.info('Guard updated', {
                 guardId: guard.guard_id,
                 updatedBy: req.user.member_id
             });
-            
+
             res.json({
                 success: true,
                 message: 'Guard updated successfully',
                 data: guard
             });
-            
+
         } catch (error) {
             logger.error('Error updating guard', { error: error.message });
             res.status(500).json({
@@ -442,28 +449,29 @@ router.delete('/:id',
     handleValidationErrors,
     async (req, res) => {
         try {
+            const { Guard } = sequelize.models;
             const guard = await Guard.findByPk(req.params.id);
-            
+
             if (!guard) {
                 return res.status(404).json({
                     success: false,
                     message: 'Guard not found'
                 });
             }
-            
+
             guard.status = 'cancelled';
             await guard.save();
-            
+
             logger.warn('Guard cancelled', {
                 guardId: guard.guard_id,
                 cancelledBy: req.user.member_id
             });
-            
+
             res.json({
                 success: true,
                 message: 'Guard cancelled successfully'
             });
-            
+
         } catch (error) {
             logger.error('Error cancelling guard', { error: error.message });
             res.status(500).json({
@@ -477,7 +485,7 @@ router.delete('/:id',
 
 /**
  * @route   POST /api/v1/guards/:id/assign
- * @desc    S'inscrire ou inscrire quelqu'un à une garde
+ * @desc    S'inscrire ou inscrire quelqu'un a une garde
  * @access  Authenticated (Silver pour soi, Gold+ pour autres)
  */
 router.post('/:id/assign',
@@ -492,10 +500,10 @@ router.post('/:id/assign',
         try {
             const guardId = req.params.id;
             const targetMemberId = req.body.member_id || req.user.member_id;
-            
-            // Vérifier les permissions
+
+            // Verifier les permissions
             if (targetMemberId !== req.user.member_id) {
-                // Doit être au moins Gold pour inscrire quelqu'un d'autre
+                // Doit etre au moins Gold pour inscrire quelqu'un d'autre
                 if (!['Gold', 'Platinum', 'Admin', 'Admin_N1'].includes(req.user.role)) {
                     return res.status(403).json({
                         success: false,
@@ -503,20 +511,20 @@ router.post('/:id/assign',
                     });
                 }
             }
-            
+
             const assignment = await GuardService.assignMember(
                 guardId,
                 targetMemberId,
                 req.user.member_id,
                 req.body.notes
             );
-            
+
             res.status(201).json({
                 success: true,
                 message: 'Successfully assigned to guard',
                 data: assignment
             });
-            
+
         } catch (error) {
             logger.error('Error assigning to guard', { error: error.message });
             res.status(500).json({
@@ -529,7 +537,7 @@ router.post('/:id/assign',
 
 /**
  * @route   POST /api/v1/guards/:id/cancel-assignment
- * @desc    Annuler son affectation à une garde
+ * @desc    Annuler son affectation a une garde
  * @access  Authenticated
  */
 router.post('/:id/cancel-assignment',
@@ -542,6 +550,7 @@ router.post('/:id/cancel-assignment',
     handleValidationErrors,
     async (req, res) => {
         try {
+            const { GuardAssignment } = sequelize.models;
             const assignment = await GuardAssignment.findOne({
                 where: {
                     guard_id: req.params.id,
@@ -549,25 +558,25 @@ router.post('/:id/cancel-assignment',
                     status: 'confirmed'
                 }
             });
-            
+
             if (!assignment) {
                 return res.status(404).json({
                     success: false,
                     message: 'Assignment not found'
                 });
             }
-            
+
             await GuardService.cancelAssignment(
                 assignment.assignment_id,
                 req.body.reason,
                 req.body.replacement_member_id
             );
-            
+
             res.json({
                 success: true,
                 message: 'Assignment cancelled successfully'
             });
-            
+
         } catch (error) {
             logger.error('Error cancelling assignment', { error: error.message });
             res.status(500).json({
@@ -581,7 +590,7 @@ router.post('/:id/cancel-assignment',
 
 /**
  * @route   POST /api/v1/guards/generate
- * @desc    Générer des gardes depuis un scénario
+ * @desc    Generer des gardes depuis un scenario
  * @access  Platinum+
  */
 router.post('/generate',
@@ -597,20 +606,20 @@ router.post('/generate',
     async (req, res) => {
         try {
             const { scenario_id, start_date, end_date, geo_id } = req.body;
-            
+
             const guards = await GuardService.generateFromScenario(
                 scenario_id,
                 start_date,
                 end_date,
                 geo_id
             );
-            
+
             res.status(201).json({
                 success: true,
                 message: `${guards.length} guards generated successfully`,
                 data: guards
             });
-            
+
         } catch (error) {
             logger.error('Error generating guards', { error: error.message });
             res.status(500).json({

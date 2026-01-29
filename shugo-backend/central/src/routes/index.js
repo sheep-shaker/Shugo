@@ -16,6 +16,8 @@ const plugins = require('./plugins');
 const emergencyCodes = require('./emergencyCodes');
 const admin = require('./admin');
 const sync = require('./sync');
+const locations = require('./locations');
+const groups = require('./groups');
 
 // Routeur des protocoles (contient tous les sous-protocoles)
 const protocols = require('./protocols');
@@ -36,7 +38,9 @@ module.exports = {
   emergencyCodes,
   admin,
   sync,
-  
+  locations,
+  groups,
+
   // Protocoles système
   protocols,
   
@@ -56,10 +60,12 @@ module.exports = {
     app.use('/api/v1/emergency', emergencyCodes);
     app.use('/api/v1/admin', admin);
     app.use('/api/sync', sync);
-    
+    app.use('/api/v1/locations', locations);
+    app.use('/api/v1/groups', groups);
+
     // Protocoles système
     app.use('/api/v1/protocols', protocols);
-    
+
     console.log('[Routes] Toutes les routes SHUGO v7 montées avec succès');
   },
   
@@ -239,6 +245,33 @@ module.exports = {
         'POST   /api/v1/admin/broadcast',
         'POST   /api/v1/admin/impersonate',
         'GET    /api/v1/admin/compliance'
+      ],
+      locations: [
+        'GET    /api/v1/locations',
+        'GET    /api/v1/locations/parents',
+        'GET    /api/v1/locations/:geoId',
+        'GET    /api/v1/locations/:geoId/children',
+        'GET    /api/v1/locations/:geoId/stats',
+        'POST   /api/v1/locations',
+        'PUT    /api/v1/locations/:geoId',
+        'DELETE /api/v1/locations/:geoId',
+        'PATCH  /api/v1/locations/:geoId/toggle'
+      ],
+      groups: [
+        'GET    /api/v1/groups',
+        'GET    /api/v1/groups/my-groups',
+        'GET    /api/v1/groups/:id',
+        'GET    /api/v1/groups/:id/members',
+        'GET    /api/v1/groups/:id/children',
+        'GET    /api/v1/groups/:id/stats',
+        'POST   /api/v1/groups',
+        'PUT    /api/v1/groups/:id',
+        'DELETE /api/v1/groups/:id',
+        'POST   /api/v1/groups/:id/add-member',
+        'POST   /api/v1/groups/:id/remove-member',
+        'POST   /api/v1/groups/:id/leave',
+        'POST   /api/v1/groups/:id/transfer-leadership',
+        'PATCH  /api/v1/groups/:id/toggle'
       ],
       protocols: {
         main: [
