@@ -129,7 +129,7 @@ async function initializeDatabase() {
 // Sync all models
 async function syncModels(options = {}) {
     try {
-        // Import all models to register them (Central Server models only)
+        // Import all models to register them
         const models = [
             require('../models/User'),
             require('../models/Location'),
@@ -139,9 +139,10 @@ async function syncModels(options = {}) {
             require('../models/Group'),
             require('../models/GroupMembership'),
             require('../models/Notification'),
-            require('../models/RegistrationToken')
+            require('../models/RegistrationToken'),
+            require('../models/Guard'),
+            require('../models/GuardAssignment')
         ];
-        // Note: Guard-related models are managed by Local Server
         
         // Create associations
         setupAssociations();
@@ -323,7 +324,7 @@ const dbUtils = {
 
 // Load models immediately to populate sequelize.models
 function loadModels() {
-    // Core models for Central Server
+    // Core models
     require('../models/User');
     require('../models/Location');
     require('../models/LocalInstance');
@@ -333,9 +334,8 @@ function loadModels() {
     require('../models/GroupMembership');
     require('../models/Notification');
     require('../models/RegistrationToken');
-
-    // Note: Guard-related models (Guard, GuardAssignment, GuardSlot, GuardScenario, WaitingList)
-    // are managed by the Local Server, not the Central Server
+    require('../models/Guard');
+    require('../models/GuardAssignment');
 
     // Setup associations
     setupAssociations();
