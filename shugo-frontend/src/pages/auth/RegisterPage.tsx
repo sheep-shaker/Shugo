@@ -4,8 +4,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Key, Mail, User, Lock, Shield, ArrowRight, Check } from 'lucide-react';
+import { Key, Mail, User, Lock, Shield, ArrowRight, Check, Copy, QrCode } from 'lucide-react';
 import { Button, Input, Card, Logo, LanguageSelector } from '@/components/ui';
+import { authService } from '@/services/auth.service';
 
 // Validation schema
 const tokenSchema = z.object({
@@ -26,12 +27,26 @@ const registerSchema = z.object({
 type TokenFormData = z.infer<typeof tokenSchema>;
 type RegisterFormData = z.infer<typeof registerSchema>;
 
+interface TwoFASetupData {
+  qr_code: string;
+  secret: string;
+  backup_codes: string[];
+  member_id: number;
+}
+
 export function RegisterPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<'token' | 'register' | 'success'>('token');
+  const [step, setStep] = useState<'token' | 'register' | '2fa_setup' | 'success'>('token');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tokenData, setTokenData] = useState<any>(null);
+  const [tokenData, setTokenData] = useState<{
+    first_name: string;
+    last_name: string;
+    role: string;
+    geo_id: string;
+  } | null>(null);
+  const [twoFAData, setTwoFAData] = useState<TwoFASetupData | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   // Token form
   const tokenForm = useForm<TokenFormData>({
@@ -45,59 +60,72 @@ export function RegisterPage() {
   });
 
   // Handle token validation
-  const onTokenSubmit = async (_data: TokenFormData) => {
+  const onTokenSubmit = async (data: TokenFormData) => {
     setError(null);
     setIsLoading(true);
 
     try {
-      // TODO: Call API to validate token and get pre-filled data
-      // const response = await api.post('/auth/validate-token', { token: data.token });
+      const response = await authService.validateToken(data.token);
 
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Mock response
-      const mockData = {
-        first_name: 'Jean',
-        last_name: 'Dupont',
-        email: 'jean.dupont@example.com',
-        geo_id: '02-033-04-00-00',
-        role: 'Silver',
-      };
-
-      setTokenData(mockData);
-      registerForm.setValue('first_name', mockData.first_name);
-      registerForm.setValue('last_name', mockData.last_name);
-      registerForm.setValue('email', mockData.email);
+      setTokenData(response);
+      registerForm.setValue('first_name', response.first_name || '');
+      registerForm.setValue('last_name', response.last_name || '');
 
       setStep('register');
-    } catch (err) {
-      setError('Jeton invalide ou expiré');
+    } catch (err: unknown) {
+      const apiError = err as { response?: { data?: { message?: string } } };
+      setError(apiError?.response?.data?.message || 'Jeton invalide ou expiré');
     } finally {
       setIsLoading(false);
     }
   };
 
   // Handle registration
-  const onRegisterSubmit = async (_data: RegisterFormData) => {
+  const onRegisterSubmit = async (data: RegisterFormData) => {
     setError(null);
     setIsLoading(true);
 
     try {
-      // TODO: Call API to create account
-      // const response = await api.post('/auth/register', {
-      //   token: tokenForm.getValues('token'),
-      //   ...data
-      // });
+      const response = await authService.register({
+        token: tokenForm.getValues('token'),
+        email: data.email,
+        password: data.password,
+        first_name: data.first_name,
+        last_name: data.last_name,
+      });
 
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      setStep('success');
-    } catch (err) {
-      setError('Erreur lors de la création du compte');
+      // Show 2FA setup
+      setTwoFAData({
+        qr_code: response.qr_code,
+        secret: response.secret,
+        backup_codes: response.backup_codes,
+        member_id: response.member_id,
+      });
+      setStep('2fa_setup');
+    } catch (err: unknown) {
+      const apiError = err as { response?: { data?: { message?: string; errors?: Array<{ message: string }> } } };
+      const errorMessage = apiError?.response?.data?.errors?.[0]?.message
+        || apiError?.response?.data?.message
+        || 'Erreur lors de la création du compte';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Copy backup code to clipboard
+  const copyToClipboard = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
+
+  // Copy all backup codes
+  const copyAllCodes = () => {
+    if (twoFAData?.backup_codes) {
+      navigator.clipboard.writeText(twoFAData.backup_codes.join('\n'));
+      setCopiedCode('all');
+      setTimeout(() => setCopiedCode(null), 2000);
     }
   };
 
@@ -260,7 +288,6 @@ export function RegisterPage() {
                     leftIcon={<Mail className="h-5 w-5" />}
                     error={registerForm.formState.errors.email?.message}
                     {...registerForm.register('email')}
-                    disabled={!!tokenData?.email}
                   />
 
                   <Input
@@ -305,7 +332,84 @@ export function RegisterPage() {
               </>
             )}
 
-            {/* Step 3: Success */}
+            {/* Step 3: 2FA Setup */}
+            {step === '2fa_setup' && twoFAData && (
+              <div className="py-4">
+                <div className="text-center mb-6">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-gold-100 rounded-2xl flex items-center justify-center">
+                    <QrCode className="h-8 w-8 text-gold-600" />
+                  </div>
+                  <h2 className="text-2xl font-display font-semibold text-gray-900 mb-2">
+                    Configuration 2FA
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    Scannez le QR code avec votre application d'authentification (Google Authenticator, Authy, etc.)
+                  </p>
+                </div>
+
+                {/* QR Code */}
+                <div className="flex justify-center mb-6">
+                  <div className="p-4 bg-white rounded-xl shadow-md">
+                    <img src={twoFAData.qr_code} alt="QR Code 2FA" className="w-48 h-48" />
+                  </div>
+                </div>
+
+                {/* Secret key (fallback) */}
+                <div className="mb-6">
+                  <p className="text-xs text-gray-500 mb-2 text-center">Ou entrez manuellement ce code :</p>
+                  <div className="flex items-center justify-center gap-2 p-3 bg-gray-100 rounded-lg">
+                    <code className="text-sm font-mono text-gray-700 break-all">{twoFAData.secret}</code>
+                    <button
+                      onClick={() => copyToClipboard(twoFAData.secret)}
+                      className="p-1 hover:bg-gray-200 rounded"
+                    >
+                      <Copy className="h-4 w-4 text-gray-500" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Backup codes */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-gray-700">Codes de secours</p>
+                    <button
+                      onClick={copyAllCodes}
+                      className="text-xs text-gold-600 hover:text-gold-700 flex items-center gap-1"
+                    >
+                      <Copy className="h-3 w-3" />
+                      {copiedCode === 'all' ? 'Copié !' : 'Tout copier'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Conservez ces codes en lieu sûr. Chaque code ne peut être utilisé qu'une fois.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {twoFAData.backup_codes.map((code, index) => (
+                      <div
+                        key={index}
+                        onClick={() => copyToClipboard(code)}
+                        className="flex items-center justify-between p-2 bg-gray-50 rounded cursor-pointer hover:bg-gray-100"
+                      >
+                        <code className="text-xs font-mono">{code}</code>
+                        {copiedCode === code && <span className="text-xs text-green-600">Copié</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full"
+                  onClick={() => setStep('success')}
+                  rightIcon={<ArrowRight className="h-5 w-5" />}
+                >
+                  J'ai sauvegardé mes codes
+                </Button>
+              </div>
+            )}
+
+            {/* Step 4: Success */}
             {step === 'success' && (
               <div className="text-center py-8">
                 <motion.div
@@ -334,7 +438,7 @@ export function RegisterPage() {
             )}
 
             {/* Footer */}
-            {step !== 'success' && (
+            {(step === 'token' || step === 'register') && (
               <>
                 <div className="my-8">
                   <div className="gold-divider" />

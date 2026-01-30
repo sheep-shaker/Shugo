@@ -29,6 +29,45 @@ const { validationRules } = require('../middleware/validation');
 const { AppError, asyncHandler } = require('../middleware/errorHandler');
 
 /**
+ * POST /api/v1/auth/validate-token
+ * Validate registration token and get pre-filled data
+ */
+router.post('/validate-token',
+    asyncHandler(async (req, res) => {
+        const { token } = req.body;
+
+        if (!token) {
+            throw new AppError('Token required', 400);
+        }
+
+        // Find token
+        const regToken = await RegistrationToken.findOne({
+            where: {
+                token_code: token,
+                status: 'active',
+                token_type: 'registration',
+                expires_at: { [Op.gt]: new Date() }
+            }
+        });
+
+        if (!regToken) {
+            throw new AppError('Invalid or expired registration token', 400);
+        }
+
+        res.json({
+            success: true,
+            data: {
+                first_name: regToken.target_first_name || '',
+                last_name: regToken.target_last_name || '',
+                role: regToken.target_role || 'Silver',
+                geo_id: regToken.geo_id,
+                expires_at: regToken.expires_at
+            }
+        });
+    })
+);
+
+/**
  * POST /api/v1/auth/register
  * Register a new user with token
  */
@@ -470,6 +509,73 @@ router.post('/reset-password',
         res.json({
             success: true,
             message: 'If the email exists, a reset link has been sent'
+        });
+    })
+);
+
+/**
+ * POST /api/v1/auth/reset-password-confirm
+ * Reset password with token
+ */
+router.post('/reset-password-confirm',
+    asyncHandler(async (req, res) => {
+        const { token, password } = req.body;
+
+        if (!token || !password) {
+            throw new AppError('Token and password are required', 400);
+        }
+
+        // Validate password strength
+        if (password.length < 8) {
+            throw new AppError('Password must be at least 8 characters', 400);
+        }
+
+        // Find reset token
+        const resetToken = await RegistrationToken.findOne({
+            where: {
+                token_code: token,
+                token_type: 'password_reset',
+                status: 'active',
+                expires_at: { [Op.gt]: new Date() }
+            }
+        });
+
+        if (!resetToken) {
+            throw new AppError('Invalid or expired reset token', 400);
+        }
+
+        // Get user
+        const user = await User.findByPk(resetToken.target_member_id);
+
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        // Update password
+        user.password_hash = await cryptoManager.hashPassword(password);
+        await user.save();
+
+        // Mark token as used
+        resetToken.status = 'used';
+        resetToken.used_at = new Date();
+        resetToken.used_by_member_id = user.member_id;
+        await resetToken.save();
+
+        // Log password reset
+        await AuditLog.logAction({
+            member_id: user.member_id,
+            action: 'PASSWORD_RESET',
+            resource_type: 'user',
+            resource_id: user.member_id.toString(),
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'auth'
+        });
+
+        res.json({
+            success: true,
+            message: 'Password reset successfully'
         });
     })
 );

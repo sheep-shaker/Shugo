@@ -5,11 +5,13 @@ import type { User, LoginCredentials, ApiResponse } from '@/types';
 const AUTH_ENDPOINTS = {
   login: '/auth/login',
   register: '/auth/register',
+  validateToken: '/auth/validate-token',
   logout: '/auth/logout',
   refresh: '/auth/refresh',
   me: '/auth/me',
   verify2FA: '/auth/verify-2fa',
   resetPassword: '/auth/reset-password',
+  resetPasswordConfirm: '/auth/reset-password-confirm',
 };
 
 // Interface pour la réponse de login du backend
@@ -53,6 +55,40 @@ interface BackendMeResponse {
 interface LoginResponse {
   user: User | null;
   requires2FA?: boolean;
+}
+
+// Interface pour la validation de jeton
+interface TokenValidationResponse {
+  success: boolean;
+  data: {
+    first_name: string;
+    last_name: string;
+    role: string;
+    geo_id: string;
+    expires_at: string;
+  };
+}
+
+// Interface pour la réponse d'inscription
+interface RegisterResponse {
+  success: boolean;
+  message: string;
+  data: {
+    member_id: number;
+    qr_code: string;
+    secret: string;
+    backup_codes: string[];
+  };
+}
+
+// Données d'inscription
+export interface RegisterData {
+  token: string;
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  phone?: string;
 }
 
 export const authService = {
@@ -204,7 +240,7 @@ export const authService = {
    * Reset password with token
    */
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    await apiPost<ApiResponse<unknown>>(AUTH_ENDPOINTS.resetPassword, {
+    await apiPost<ApiResponse<unknown>>(AUTH_ENDPOINTS.resetPasswordConfirm, {
       token,
       password: newPassword
     });
@@ -215,5 +251,27 @@ export const authService = {
    */
   async verify2FASetup(totpToken: string): Promise<void> {
     await apiPost<ApiResponse<unknown>>(AUTH_ENDPOINTS.verify2FA, { totp_token: totpToken });
+  },
+
+  /**
+   * Validate registration token
+   */
+  async validateToken(token: string): Promise<TokenValidationResponse['data']> {
+    const response = await api.post<TokenValidationResponse>(AUTH_ENDPOINTS.validateToken, { token });
+    if (!response.data.success) {
+      throw new Error('Invalid token');
+    }
+    return response.data.data;
+  },
+
+  /**
+   * Register new user with token
+   */
+  async register(data: RegisterData): Promise<RegisterResponse['data']> {
+    const response = await api.post<RegisterResponse>(AUTH_ENDPOINTS.register, data);
+    if (!response.data.success) {
+      throw new Error('Registration failed');
+    }
+    return response.data.data;
   },
 };

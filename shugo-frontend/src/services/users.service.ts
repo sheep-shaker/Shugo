@@ -77,6 +77,40 @@ export interface Session {
   is_current: boolean;
 }
 
+export interface RegistrationToken {
+  token_id: string;
+  token_code: string;
+  token_type: string;
+  geo_id: string;
+  target_first_name?: string;
+  target_last_name?: string;
+  target_role: string;
+  status: 'active' | 'used' | 'expired' | 'revoked';
+  expires_at: string;
+  created_at: string;
+  created_by_member_id: number;
+}
+
+export interface CreateTokenData {
+  first_name?: string;
+  last_name?: string;
+  role?: string;
+  geo_id: string;
+  group_id?: string;
+  expires_days?: number;
+  notes?: string;
+}
+
+export interface Reset2FAResponse {
+  qr_code: string;
+  secret: string;
+  reset_token: string;
+}
+
+export interface ResetPasswordResponse {
+  reset_token: string;
+}
+
 export const usersService = {
   /**
    * Get list of users (admin only)
@@ -143,5 +177,61 @@ export const usersService = {
     // Extract number from message like "5 sessions invalidated"
     const match = response.data.message.match(/(\d+)/);
     return match ? parseInt(match[1]) : 0;
+  },
+
+  /**
+   * Create a registration token (admin only)
+   */
+  async createRegistrationToken(data: CreateTokenData): Promise<RegistrationToken> {
+    const response = await api.post<{ success: boolean; data: RegistrationToken }>(
+      '/users/registration-tokens',
+      data
+    );
+    return response.data.data;
+  },
+
+  /**
+   * Get all registration tokens (admin only)
+   */
+  async getRegistrationTokens(params: { status?: string; page?: number; limit?: number } = {}): Promise<{
+    tokens: RegistrationToken[];
+    pagination: { total: number; page: number; limit: number; pages: number };
+  }> {
+    const response = await api.get<{
+      success: boolean;
+      data: RegistrationToken[];
+      pagination: { total: number; page: number; limit: number; pages: number };
+    }>('/users/registration-tokens', { params });
+    return {
+      tokens: response.data.data,
+      pagination: response.data.pagination,
+    };
+  },
+
+  /**
+   * Revoke a registration token (admin only)
+   */
+  async revokeRegistrationToken(tokenId: string): Promise<void> {
+    await api.delete(`/users/registration-tokens/${tokenId}`);
+  },
+
+  /**
+   * Admin reset password for a user
+   */
+  async adminResetPassword(userId: string): Promise<ResetPasswordResponse> {
+    const response = await api.post<{ success: boolean; data: ResetPasswordResponse }>(
+      `/users/${userId}/reset-password-admin`
+    );
+    return response.data.data;
+  },
+
+  /**
+   * Admin reset 2FA for a user
+   */
+  async adminReset2FA(userId: string): Promise<Reset2FAResponse> {
+    const response = await api.post<{ success: boolean; data: Reset2FAResponse }>(
+      `/users/${userId}/reset-2fa`
+    );
+    return response.data.data;
   },
 };
