@@ -15,6 +15,7 @@ const Session = require('../models/Session');
 const Group = require('../models/Group');
 const GroupMembership = require('../models/GroupMembership');
 const AuditLog = require('../models/AuditLog');
+const RegistrationToken = require('../models/RegistrationToken');
 
 // Middleware
 const { authenticateToken, checkRole, checkScope } = require('../middleware/auth');
@@ -818,6 +819,366 @@ router.post('/:id/test-notification',
                 notification_id: notification.notification_id,
                 channel: targetChannel,
                 status: notification.status
+            }
+        });
+    })
+);
+
+// ==========================================
+// REGISTRATION TOKENS MANAGEMENT
+// ==========================================
+
+/**
+ * POST /api/v1/users/registration-tokens
+ * Create a registration token for a new user (admin only)
+ */
+router.post('/registration-tokens',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1', 'Platinum']),
+    asyncHandler(async (req, res) => {
+        const {
+            first_name,
+            last_name,
+            role = 'Silver',
+            geo_id,
+            group_id,
+            expires_days = 7,
+            notes
+        } = req.body;
+
+        // Validate required fields
+        if (!first_name || !last_name || !geo_id) {
+            throw new AppError('Missing required fields: first_name, last_name, geo_id', 400);
+        }
+
+        // Validate role permissions
+        if (role === 'Admin_N1' && req.user.role !== 'Admin_N1') {
+            throw new AppError('Only Admin_N1 can create Admin_N1 tokens', 403);
+        }
+        if (role === 'Admin' && !['Admin', 'Admin_N1'].includes(req.user.role)) {
+            throw new AppError('Only Admin or Admin_N1 can create Admin tokens', 403);
+        }
+
+        // Generate token code and hash
+        const crypto = require('crypto');
+        const tokenCode = RegistrationToken.generateCode(8);
+        const tokenHash = crypto.createHash('sha256').update(tokenCode).digest('hex');
+
+        // Create registration token
+        const token = await RegistrationToken.create({
+            token_code: tokenCode,
+            token_hash: tokenHash,
+            token_type: 'registration',
+            geo_id,
+            created_by_member_id: req.user.member_id,
+            target_first_name: first_name,
+            target_last_name: last_name,
+            target_role: role,
+            target_group_id: group_id || null,
+            expires_at: new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000),
+            notes: notes || null
+        });
+
+        // Log the creation
+        await AuditLog.logAction({
+            member_id: req.user.member_id,
+            action: 'CREATE_REGISTRATION_TOKEN',
+            resource_type: 'registration_token',
+            resource_id: token.token_id,
+            new_values: { first_name, last_name, role, geo_id },
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'admin'
+        });
+
+        logger.info('Registration token created', {
+            tokenId: token.token_id,
+            createdBy: req.user.member_id,
+            targetName: `${first_name} ${last_name}`,
+            role
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Registration token created successfully',
+            data: {
+                token_id: token.token_id,
+                token_code: token.token_code,
+                first_name: token.target_first_name,
+                last_name: token.target_last_name,
+                role: token.target_role,
+                geo_id: token.geo_id,
+                expires_at: token.expires_at,
+                status: token.status
+            }
+        });
+    })
+);
+
+/**
+ * GET /api/v1/users/registration-tokens
+ * Get all registration tokens (admin only)
+ */
+router.get('/registration-tokens',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1', 'Platinum']),
+    asyncHandler(async (req, res) => {
+        const { status, geo_id, page = 1, limit = 50 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const where = { token_type: 'registration' };
+        if (status) where.status = status;
+        if (geo_id) where.geo_id = geo_id;
+
+        // Non-Admin_N1 can only see tokens they created or for their geo_id
+        if (req.user.role !== 'Admin_N1') {
+            where[Op.or] = [
+                { created_by_member_id: req.user.member_id },
+                { geo_id: req.user.geo_id }
+            ];
+        }
+
+        const { count, rows: tokens } = await RegistrationToken.findAndCountAll({
+            where,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            order: [['created_at', 'DESC']],
+            include: [{
+                model: User,
+                as: 'creator',
+                attributes: ['member_id', 'first_name_encrypted', 'last_name_encrypted']
+            }]
+        });
+
+        res.json({
+            success: true,
+            data: {
+                tokens: tokens.map(t => ({
+                    token_id: t.token_id,
+                    token_code: t.token_code,
+                    first_name: t.target_first_name,
+                    last_name: t.target_last_name,
+                    role: t.target_role,
+                    geo_id: t.geo_id,
+                    status: t.status,
+                    expires_at: t.expires_at,
+                    used_at: t.used_at,
+                    created_at: t.created_at,
+                    created_by: t.creator ? {
+                        member_id: t.creator.member_id,
+                        name: `${t.creator.first_name_encrypted} ${t.creator.last_name_encrypted}`
+                    } : null
+                })),
+                pagination: {
+                    total: count,
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    pages: Math.ceil(count / limit)
+                }
+            }
+        });
+    })
+);
+
+/**
+ * GET /api/v1/users/registration-tokens/:id
+ * Get a specific registration token
+ */
+router.get('/registration-tokens/:id',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1', 'Platinum']),
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+
+        const token = await RegistrationToken.findByPk(id);
+
+        if (!token) {
+            throw new AppError('Registration token not found', 404);
+        }
+
+        res.json({
+            success: true,
+            data: {
+                token_id: token.token_id,
+                token_code: token.token_code,
+                first_name: token.target_first_name,
+                last_name: token.target_last_name,
+                role: token.target_role,
+                geo_id: token.geo_id,
+                status: token.status,
+                expires_at: token.expires_at,
+                used_at: token.used_at,
+                used_by_member_id: token.used_by_member_id,
+                created_at: token.created_at,
+                notes: token.notes
+            }
+        });
+    })
+);
+
+/**
+ * DELETE /api/v1/users/registration-tokens/:id
+ * Revoke a registration token
+ */
+router.delete('/registration-tokens/:id',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1', 'Platinum']),
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        const token = await RegistrationToken.findByPk(id);
+
+        if (!token) {
+            throw new AppError('Registration token not found', 404);
+        }
+
+        if (token.status !== 'active') {
+            throw new AppError('Token is not active and cannot be revoked', 400);
+        }
+
+        // Revoke the token
+        await token.revoke(reason || 'Revoked by admin');
+
+        // Log the revocation
+        await AuditLog.logAction({
+            member_id: req.user.member_id,
+            action: 'REVOKE_REGISTRATION_TOKEN',
+            resource_type: 'registration_token',
+            resource_id: token.token_id,
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'admin'
+        });
+
+        res.json({
+            success: true,
+            message: 'Registration token revoked successfully'
+        });
+    })
+);
+
+/**
+ * POST /api/v1/users/:id/reset-2fa
+ * Reset 2FA for a user (admin only)
+ */
+router.post('/:id/reset-2fa',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1']),
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+
+        const user = await User.findByPk(id);
+
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        // Reset 2FA
+        const speakeasy = require('speakeasy');
+        const qrcode = require('qrcode');
+
+        const secret = speakeasy.generateSecret({
+            name: `SHUGO (${user.email_encrypted})`,
+            issuer: 'SHUGO System'
+        });
+
+        user.totp_secret_encrypted = secret.base32;
+        user.totp_enabled = false;
+        user.totp_verified = false;
+        user.totp_backup_codes = [];
+        await user.save();
+
+        // Generate QR code
+        const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+        // Create a token for the user to complete 2FA setup
+        const resetToken = await RegistrationToken.create({
+            token_code: RegistrationToken.generateCode(8),
+            token_type: 'totp_reset',
+            geo_id: user.geo_id,
+            created_by_member_id: req.user.member_id,
+            target_member_id: user.member_id,
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+        });
+
+        // Log the reset
+        await AuditLog.logAction({
+            member_id: req.user.member_id,
+            action: 'RESET_2FA',
+            resource_type: 'user',
+            resource_id: id,
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'security'
+        });
+
+        logger.info('2FA reset for user', {
+            userId: id,
+            resetBy: req.user.member_id
+        });
+
+        res.json({
+            success: true,
+            message: '2FA has been reset. User must reconfigure their authenticator.',
+            data: {
+                qr_code: qrCodeUrl,
+                secret: secret.base32,
+                reset_token: resetToken.token_code
+            }
+        });
+    })
+);
+
+/**
+ * POST /api/v1/users/:id/reset-password-admin
+ * Admin reset password - generates a token for the user
+ */
+router.post('/:id/reset-password-admin',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1']),
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+
+        const user = await User.findByPk(id);
+
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        // Create password reset token
+        const resetToken = await RegistrationToken.createPasswordReset(
+            user.member_id,
+            user.email_encrypted,
+            req.user.member_id
+        );
+
+        // Log the reset
+        await AuditLog.logAction({
+            member_id: req.user.member_id,
+            action: 'ADMIN_PASSWORD_RESET',
+            resource_type: 'user',
+            resource_id: id,
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'security'
+        });
+
+        logger.info('Password reset initiated by admin', {
+            userId: id,
+            resetBy: req.user.member_id
+        });
+
+        res.json({
+            success: true,
+            message: 'Password reset token generated',
+            data: {
+                reset_token: resetToken.token_code,
+                expires_at: resetToken.expires_at
             }
         });
     })

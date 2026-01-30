@@ -201,8 +201,9 @@ const validationRules = {
             commonValidations.password(),
             body('first_name').notEmpty().trim().isLength({ max: 100 }),
             body('last_name').notEmpty().trim().isLength({ max: 100 }),
-            commonValidations.geoId(),
-            commonValidations.role(),
+            // geo_id et role sont optionnels car ils viennent du token d'inscription
+            body('geo_id').optional().matches(/^[0-9]{2}-[0-9]{1,3}-[0-9]{2}-[0-9]{2}-[0-9]{2}$/),
+            body('role').optional().isIn(['Silver', 'Gold', 'Platinum', 'Admin']),
             body('token').notEmpty().withMessage('Registration token required'),
             handleValidationErrors
         ],

@@ -98,8 +98,10 @@ router.post('/register',
             regToken.used_by_member_id = member_id;
             await regToken.save({ transaction });
             
-            // Log registration
-            await AuditLog.logAction({
+            await transaction.commit();
+
+            // Log registration (non-blocking to avoid SQLITE_BUSY)
+            AuditLog.logAction({
                 member_id,
                 action: 'REGISTER',
                 resource_type: 'user',
@@ -108,9 +110,7 @@ router.post('/register',
                 user_agent: req.get('user-agent'),
                 result: 'success',
                 category: 'auth'
-            });
-            
-            await transaction.commit();
+            }).catch(err => logger.warn('Failed to log registration:', err.message));
             
             res.status(201).json({
                 success: true,

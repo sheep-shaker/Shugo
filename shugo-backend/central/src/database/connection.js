@@ -25,7 +25,19 @@ const sequelizeOptions = isSQLite ? {
     logging: config.isDevelopment ? (msg, timing) => {
         logger.debug(`[${timing || 0}ms] ${msg}`);
     } : false,
-    benchmark: config.isDevelopment
+    benchmark: config.isDevelopment,
+    // SQLite concurrency options
+    pool: {
+        max: 1,  // SQLite works best with single connection
+        min: 0,
+        acquire: 30000,
+        idle: 10000
+    },
+    retry: {
+        max: 3,
+        match: [/SQLITE_BUSY/]
+    },
+    transactionType: 'IMMEDIATE'  // Helps prevent SQLITE_BUSY
 } : {
     ...config.database,
     dialectOptions: {

@@ -161,14 +161,16 @@ async function startServer() {
             logger.info('📊 Database models synchronized');
         }
         
-        // Start scheduler (legacy)
-        if (!config.isTest) {
+        // Start scheduler (legacy) - DISABLED FOR TESTING (SQLite BUSY issue)
+        if (!config.isTest && false) { // Temporarily disabled
             scheduler.start();
             logger.success('⏰ Scheduler started');
 
             // Initialize new job system
             await jobManager.initialize(app);
             logger.success('⏰ Job Manager initialized');
+        } else {
+            logger.warn('⏰ Schedulers disabled for testing');
         }
         
         // Start server
