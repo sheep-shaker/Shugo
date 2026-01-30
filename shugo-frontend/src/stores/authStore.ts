@@ -41,6 +41,7 @@ export const useAuthStore = create<AuthState>()(
 
           if (response.requires2FA) {
             // Backend requires 2FA, store credentials for second attempt
+            console.log('[AuthStore] 2FA required');
             set({
               isLoading: false,
               requires2FA: true,
@@ -49,6 +50,7 @@ export const useAuthStore = create<AuthState>()(
             return false; // Needs 2FA
           }
 
+          console.log('[AuthStore] Login successful, setting user:', response.user);
           set({
             user: response.user,
             isAuthenticated: true,
@@ -56,12 +58,20 @@ export const useAuthStore = create<AuthState>()(
             requires2FA: false,
             pendingCredentials: null,
           });
+          console.log('[AuthStore] State updated, returning true');
           return true;
         } catch (error: unknown) {
           let message = 'Erreur de connexion';
-          if (error && typeof error === 'object' && 'message' in error) {
-            message = (error as { message: string }).message;
+          // Handle API error structure: { success: false, error: { code, message } }
+          if (error && typeof error === 'object') {
+            const apiError = error as { error?: { message?: string }; message?: string };
+            if (apiError.error?.message) {
+              message = apiError.error.message;
+            } else if (apiError.message) {
+              message = apiError.message;
+            }
           }
+          console.error('Login error:', error);
           set({ isLoading: false, error: message });
           return false;
         }

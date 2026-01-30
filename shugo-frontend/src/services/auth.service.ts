@@ -60,47 +60,61 @@ export const authService = {
    * Login with email and password
    */
   async login(credentials: LoginCredentials): Promise<LoginResponse> {
-    const response = await api.post<BackendLoginResponse>(
-      AUTH_ENDPOINTS.login,
-      {
-        email: credentials.email,
-        password: credentials.password,
-        totp_token: credentials.totp_code,
+    console.log('[AuthService] Attempting login for:', credentials.email);
+
+    try {
+      const response = await api.post<BackendLoginResponse>(
+        AUTH_ENDPOINTS.login,
+        {
+          email: credentials.email,
+          password: credentials.password,
+          totp_token: credentials.totp_code,
+        }
+      );
+
+      console.log('[AuthService] Login response:', response.data);
+
+      // Si 2FA est requis
+      if (response.data.require_2fa && !response.data.data) {
+        console.log('[AuthService] 2FA required');
+        return {
+          user: null,
+          requires2FA: true,
+        };
       }
-    );
 
-    // Si 2FA est requis
-    if (response.data.require_2fa && !response.data.data) {
-      return {
-        user: null,
-        requires2FA: true,
-      };
-    }
+      // Login réussi
+      if (response.data.success && response.data.data) {
+        const { access_token, refresh_token, user } = response.data.data;
+        console.log('[AuthService] Login successful, storing tokens');
+        setTokens(access_token, refresh_token);
 
-    // Login réussi
-    if (response.data.success && response.data.data) {
-      const { access_token, refresh_token, user } = response.data.data;
-      setTokens(access_token, refresh_token);
-
-      const now = new Date().toISOString();
-      return {
-        user: {
+        const now = new Date().toISOString();
+        const userData = {
           member_id: user.member_id.toString(),
           email: '', // Pas fourni dans la réponse login
           first_name: user.first_name,
           last_name: user.last_name,
           role: user.role as User['role'],
-          status: 'active',
+          status: 'active' as const,
           geo_id: user.geo_id,
           two_factor_enabled: false,
           created_at: now,
           updated_at: now,
-        },
-        requires2FA: false,
-      };
-    }
+        };
+        console.log('[AuthService] User data:', userData);
+        return {
+          user: userData,
+          requires2FA: false,
+        };
+      }
 
-    throw new Error('Login failed');
+      console.error('[AuthService] Unexpected response structure');
+      throw new Error('Login failed');
+    } catch (error) {
+      console.error('[AuthService] Login error:', error);
+      throw error;
+    }
   },
 
   /**
