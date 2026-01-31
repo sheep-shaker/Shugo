@@ -148,9 +148,13 @@ const config = {
     // Rate limiting
     rateLimit: {
       windowMs: parseInt(process.env.RATE_LIMIT_WINDOW, 10) || 15 * 60 * 1000, // 15 min
-      maxRequests: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
+      max: parseInt(process.env.RATE_LIMIT_MAX, 10) || (process.env.NODE_ENV === 'development' ? 10000 : 100),
+      maxRequests: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100, // Legacy, kept for compatibility
       maxAuthAttempts: parseInt(process.env.RATE_LIMIT_AUTH, 10) || 5,
-      authLockoutMinutes: parseInt(process.env.AUTH_LOCKOUT_MINUTES, 10) || 15
+      authLockoutMinutes: parseInt(process.env.AUTH_LOCKOUT_MINUTES, 10) || 15,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many requests, please try again later.' }
     },
 
     // Session

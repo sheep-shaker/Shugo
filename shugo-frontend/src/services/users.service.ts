@@ -3,13 +3,13 @@ import type { User, UserRole } from '@/types';
 
 // Types pour les utilisateurs
 export interface UserListItem {
-  member_id: string;
+  member_id: number;
   email: string;
   first_name: string;
   last_name: string;
   role: UserRole;
   geo_id: string;
-  status: 'active' | 'inactive' | 'suspended' | 'deleted';
+  status: 'active' | 'inactive' | 'suspended' | 'deleted' | 'pending_verification';
   created_at: string;
 }
 
@@ -233,5 +233,33 @@ export const usersService = {
       `/users/${userId}/reset-2fa`
     );
     return response.data.data;
+  },
+
+  /**
+   * Suspend/Blacklist a user
+   */
+  async suspendUser(userId: string): Promise<void> {
+    await api.patch(`/users/${userId}/status`, { status: 'suspended' });
+  },
+
+  /**
+   * Activate a user (unblock)
+   */
+  async activateUser(userId: string): Promise<void> {
+    await api.patch(`/users/${userId}/status`, { status: 'active' });
+  },
+
+  /**
+   * Deactivate a user
+   */
+  async deactivateUser(userId: string): Promise<void> {
+    await api.patch(`/users/${userId}/status`, { status: 'inactive' });
+  },
+
+  /**
+   * Delete user permanently (Protocole Cendre Blanche)
+   */
+  async deleteUserPermanent(userId: string): Promise<void> {
+    await api.delete(`/users/${userId}`, { params: { permanent: true } });
   },
 };

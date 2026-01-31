@@ -238,15 +238,19 @@ RegistrationToken.prototype.isValid = function() {
 };
 
 // Méthodes statiques
-RegistrationToken.generateCode = function(length = 8) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+RegistrationToken.generateCode = function(length = 16) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz';
+    const crypto = require('crypto');
     let code = '';
-    
+
+    // Utiliser crypto.randomBytes pour une génération sécurisée
+    const randomBytes = crypto.randomBytes(length);
+
     for (let i = 0; i < length; i++) {
         if (i > 0 && i % 4 === 0) code += '-';
-        code += chars[Math.floor(Math.random() * chars.length)];
+        code += chars[randomBytes[i] % chars.length];
     }
-    
+
     return code;
 };
 

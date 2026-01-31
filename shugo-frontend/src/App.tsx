@@ -7,7 +7,7 @@ import { AnimatePresence } from 'framer-motion';
 import { AuthLayout, ProtectedRoute, DashboardLayout } from '@/components/layout';
 
 // Auth Pages
-import { LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/auth';
+import { LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage, Reset2FAPage } from '@/pages/auth';
 
 // Dashboard Pages
 import { DashboardPage } from '@/pages/dashboard';
@@ -82,6 +82,8 @@ function AppContent() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/auth/reset-2fa" element={<Reset2FAPage />} />
         </Route>
 
         {/* Protected Routes - Dashboard */}

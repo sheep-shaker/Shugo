@@ -294,6 +294,159 @@ router.get('/coverage-stats',
 );
 
 /**
+ * @route   GET /api/v1/guards/scenarios
+ * @desc    Get available guard scenarios for a location
+ * @access  Authenticated
+ */
+router.get('/scenarios',
+    authenticateToken,
+    async (req, res) => {
+        try {
+            const { GuardScenario } = sequelize.models;
+            const geoId = req.query.geo_id ||
+                (req.user.scope && req.user.scope.startsWith('local:')
+                    ? req.user.scope.replace('local:', '')
+                    : req.user.geo_id);
+
+            const scenarios = await GuardScenario.findAll({
+                where: {
+                    geo_id: geoId,
+                    is_active: true
+                },
+                order: [['is_default', 'DESC'], ['name', 'ASC']]
+            });
+
+            res.json({
+                success: true,
+                data: scenarios
+            });
+
+        } catch (error) {
+            logger.error('Error fetching scenarios', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching scenarios',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * @route   GET /api/v1/guards/slots
+ * @desc    Get available guard slots for a date range
+ * @access  Authenticated
+ */
+router.get('/slots',
+    authenticateToken,
+    [
+        query('start_date').isISO8601(),
+        query('end_date').isISO8601(),
+        query('geo_id').optional().matches(/^[0-9]{2}-[0-9]{1,3}-[0-9]{2}-[0-9]{2}-[0-9]{2}$/)
+    ],
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const { Guard, GuardScenario } = sequelize.models;
+            const { start_date, end_date } = req.query;
+            const geoId = req.query.geo_id ||
+                (req.user.scope && req.user.scope.startsWith('local:')
+                    ? req.user.scope.replace('local:', '')
+                    : req.user.geo_id);
+
+            const scenario = await GuardScenario.findOne({
+                where: {
+                    geo_id: geoId,
+                    is_default: true,
+                    is_active: true
+                }
+            });
+
+            if (!scenario) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No default scenario found for this location'
+                });
+            }
+
+            const existingGuards = await Guard.findAll({
+                where: {
+                    geo_id: geoId,
+                    guard_date: {
+                        [Op.between]: [start_date, end_date]
+                    },
+                    status: { [Op.ne]: 'cancelled' }
+                },
+                order: [['guard_date', 'ASC'], ['start_time', 'ASC']]
+            });
+
+            const slotsByDate = {};
+            const startD = new Date(start_date);
+            const endD = new Date(end_date);
+
+            for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                const dayOfWeek = d.getDay();
+                const weekdayConfig = scenario.template_data.weekday_config?.[dayOfWeek];
+
+                if (!weekdayConfig?.enabled) continue;
+
+                const templateSlots = scenario.template_data.slots || [];
+                const nightSlot = scenario.template_data.night_slot;
+
+                slotsByDate[dateStr] = {
+                    date: dateStr,
+                    day_of_week: dayOfWeek,
+                    day_label: weekdayConfig?.label || '',
+                    slots: templateSlots.map(slot => {
+                        const existingGuard = existingGuards.find(g =>
+                            g.guard_date === dateStr &&
+                            g.start_time === slot.start_time
+                        );
+
+                        return {
+                            ...slot,
+                            activated: !!existingGuard,
+                            guard_id: existingGuard?.guard_id || null,
+                            current_participants: existingGuard?.current_participants || 0,
+                            status: existingGuard?.status || 'inactive'
+                        };
+                    }),
+                    night_slot: nightSlot ? {
+                        ...nightSlot,
+                        activated: existingGuards.some(g =>
+                            g.guard_date === dateStr &&
+                            g.start_time === nightSlot.start_time
+                        ),
+                        guard_id: existingGuards.find(g =>
+                            g.guard_date === dateStr &&
+                            g.start_time === nightSlot.start_time
+                        )?.guard_id || null
+                    } : null
+                };
+            }
+
+            res.json({
+                success: true,
+                data: {
+                    scenario,
+                    slots_by_date: slotsByDate,
+                    total_days: Object.keys(slotsByDate).length
+                }
+            });
+
+        } catch (error) {
+            logger.error('Error fetching slots', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error fetching slots',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
  * @route   GET /api/v1/guards/:id
  * @desc    Obtenir une garde spécifique
  * @access  Authenticated
@@ -625,6 +778,403 @@ router.post('/generate',
             res.status(500).json({
                 success: false,
                 message: 'Error generating guards',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * @route   POST /api/v1/guards/slots/activate
+ * @desc    Activate guard slots for a date range
+ * @access  Platinum+
+ */
+router.post('/slots/activate',
+    authenticateToken,
+    checkRole(['Platinum', 'Admin', 'Admin_N1']),
+    [
+        body('start_date').isISO8601(),
+        body('end_date').isISO8601(),
+        body('geo_id').matches(/^[0-9]{2}-[0-9]{1,3}-[0-9]{2}-[0-9]{2}-[0-9]{2}$/),
+        body('slot_indices').optional().isArray(),
+        body('include_night').optional().isBoolean()
+    ],
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const { Guard, GuardScenario } = sequelize.models;
+            const { start_date, end_date, geo_id, slot_indices, include_night } = req.body;
+
+            // Get default scenario
+            const scenario = await GuardScenario.findOne({
+                where: {
+                    geo_id: geo_id,
+                    is_default: true,
+                    is_active: true
+                }
+            });
+
+            if (!scenario) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No default scenario found for this location'
+                });
+            }
+
+            const createdGuards = [];
+            const startD = new Date(start_date);
+            const endD = new Date(end_date);
+
+            for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                const dayOfWeek = d.getDay();
+                const weekdayConfig = scenario.template_data.weekday_config?.[dayOfWeek];
+
+                if (!weekdayConfig?.enabled) continue;
+
+                // Filter slots if indices provided
+                let slotsToActivate = scenario.template_data.slots || [];
+                if (slot_indices && slot_indices.length > 0) {
+                    slotsToActivate = slotsToActivate.filter(s => slot_indices.includes(s.slot_index));
+                }
+
+                for (const slot of slotsToActivate) {
+                    // Check if guard already exists
+                    const existing = await Guard.findOne({
+                        where: {
+                            geo_id: geo_id,
+                            guard_date: dateStr,
+                            start_time: slot.start_time,
+                            status: { [Op.ne]: 'cancelled' }
+                        }
+                    });
+
+                    if (existing) continue;
+
+                    // Create guard for this slot
+                    const guard = await Guard.create({
+                        geo_id: geo_id,
+                        guard_date: dateStr,
+                        start_time: slot.start_time,
+                        end_time: slot.end_time,
+                        slot_duration: slot.duration_minutes,
+                        max_participants: slot.max_participants,
+                        min_participants: slot.min_participants,
+                        guard_type: slot.guard_type,
+                        status: 'open',
+                        created_by_member_id: req.user.member_id,
+                        scenario_id: scenario.scenario_id,
+                        auto_generated: true
+                    });
+
+                    createdGuards.push(guard);
+                }
+
+                // Night slot
+                if (include_night && scenario.template_data.night_slot) {
+                    const nightSlot = scenario.template_data.night_slot;
+                    const existingNight = await Guard.findOne({
+                        where: {
+                            geo_id: geo_id,
+                            guard_date: dateStr,
+                            start_time: nightSlot.start_time,
+                            status: { [Op.ne]: 'cancelled' }
+                        }
+                    });
+
+                    if (!existingNight) {
+                        const guard = await Guard.create({
+                            geo_id: geo_id,
+                            guard_date: dateStr,
+                            start_time: nightSlot.start_time,
+                            end_time: nightSlot.end_time,
+                            slot_duration: nightSlot.duration_minutes,
+                            max_participants: nightSlot.max_participants,
+                            min_participants: nightSlot.min_participants,
+                            guard_type: nightSlot.guard_type,
+                            description: nightSlot.description,
+                            status: 'open',
+                            created_by_member_id: req.user.member_id,
+                            scenario_id: scenario.scenario_id,
+                            auto_generated: true
+                        });
+                        createdGuards.push(guard);
+                    }
+                }
+            }
+
+            logger.info('Guard slots activated', {
+                count: createdGuards.length,
+                geo_id,
+                start_date,
+                end_date,
+                activated_by: req.user.member_id
+            });
+
+            res.status(201).json({
+                success: true,
+                message: `${createdGuards.length} guard slots activated`,
+                data: createdGuards
+            });
+
+        } catch (error) {
+            logger.error('Error activating slots', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error activating slots',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * @route   POST /api/v1/guards/slots/deactivate
+ * @desc    Deactivate (cancel) guard slots for a date range
+ * @access  Platinum+
+ */
+router.post('/slots/deactivate',
+    authenticateToken,
+    checkRole(['Platinum', 'Admin', 'Admin_N1']),
+    [
+        body('start_date').isISO8601(),
+        body('end_date').isISO8601(),
+        body('geo_id').matches(/^[0-9]{2}-[0-9]{1,3}-[0-9]{2}-[0-9]{2}-[0-9]{2}$/),
+        body('slot_indices').optional().isArray(),
+        body('include_night').optional().isBoolean(),
+        body('reason').optional().isString()
+    ],
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const { Guard, GuardAssignment, GuardScenario } = sequelize.models;
+            const { start_date, end_date, geo_id, slot_indices, include_night, reason } = req.body;
+
+            // Get scenario for slot times
+            const scenario = await GuardScenario.findOne({
+                where: {
+                    geo_id: geo_id,
+                    is_default: true,
+                    is_active: true
+                }
+            });
+
+            const where = {
+                geo_id: geo_id,
+                guard_date: {
+                    [Op.between]: [start_date, end_date]
+                },
+                status: { [Op.ne]: 'cancelled' }
+            };
+
+            // If specific slots, filter by start_time
+            if (slot_indices && slot_indices.length > 0 && scenario) {
+                const slotTimes = scenario.template_data.slots
+                    .filter(s => slot_indices.includes(s.slot_index))
+                    .map(s => s.start_time);
+
+                if (!include_night || !scenario.template_data.night_slot) {
+                    where.start_time = { [Op.in]: slotTimes };
+                }
+            }
+
+            const guards = await Guard.findAll({ where });
+
+            // Check for registered participants
+            const guardsWithParticipants = [];
+            const guardsToCancel = [];
+
+            for (const guard of guards) {
+                const assignments = await GuardAssignment.count({
+                    where: {
+                        guard_id: guard.guard_id,
+                        status: 'confirmed'
+                    }
+                });
+
+                if (assignments > 0) {
+                    guardsWithParticipants.push({
+                        guard_id: guard.guard_id,
+                        guard_date: guard.guard_date,
+                        start_time: guard.start_time,
+                        participants: assignments
+                    });
+                } else {
+                    guardsToCancel.push(guard);
+                }
+            }
+
+            // Cancel guards without participants
+            for (const guard of guardsToCancel) {
+                await guard.update({
+                    status: 'cancelled',
+                    description: reason ? `${guard.description || ''}\n[DÉSACTIVÉ: ${reason}]` : guard.description
+                });
+            }
+
+            logger.info('Guard slots deactivated', {
+                cancelled: guardsToCancel.length,
+                with_participants: guardsWithParticipants.length,
+                geo_id,
+                deactivated_by: req.user.member_id
+            });
+
+            res.json({
+                success: true,
+                message: `${guardsToCancel.length} guard slots deactivated`,
+                data: {
+                    cancelled_count: guardsToCancel.length,
+                    skipped: guardsWithParticipants,
+                    skipped_count: guardsWithParticipants.length
+                }
+            });
+
+        } catch (error) {
+            logger.error('Error deactivating slots', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error deactivating slots',
+                error: error.message
+            });
+        }
+    }
+);
+
+/**
+ * @route   POST /api/v1/guards/slots/toggle
+ * @desc    Toggle a single guard slot
+ * @access  Platinum+
+ */
+router.post('/slots/toggle',
+    authenticateToken,
+    checkRole(['Platinum', 'Admin', 'Admin_N1']),
+    [
+        body('date').isISO8601(),
+        body('start_time').matches(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/),
+        body('geo_id').matches(/^[0-9]{2}-[0-9]{1,3}-[0-9]{2}-[0-9]{2}-[0-9]{2}$/),
+        body('activate').isBoolean()
+    ],
+    handleValidationErrors,
+    async (req, res) => {
+        try {
+            const { Guard, GuardScenario, GuardAssignment } = sequelize.models;
+            const { date, start_time, geo_id, activate } = req.body;
+
+            // Find scenario for slot configuration
+            const scenario = await GuardScenario.findOne({
+                where: {
+                    geo_id: geo_id,
+                    is_default: true,
+                    is_active: true
+                }
+            });
+
+            if (!scenario) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'No default scenario found'
+                });
+            }
+
+            // Find slot in template
+            const slotConfig = scenario.template_data.slots?.find(s => s.start_time === start_time) ||
+                              (scenario.template_data.night_slot?.start_time === start_time ? scenario.template_data.night_slot : null);
+
+            if (!slotConfig) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Slot not found in scenario template'
+                });
+            }
+
+            if (activate) {
+                // Create guard if not exists
+                const existing = await Guard.findOne({
+                    where: {
+                        geo_id: geo_id,
+                        guard_date: date,
+                        start_time: start_time,
+                        status: { [Op.ne]: 'cancelled' }
+                    }
+                });
+
+                if (existing) {
+                    return res.json({
+                        success: true,
+                        message: 'Slot already activated',
+                        data: existing
+                    });
+                }
+
+                const guard = await Guard.create({
+                    geo_id: geo_id,
+                    guard_date: date,
+                    start_time: start_time,
+                    end_time: slotConfig.end_time,
+                    slot_duration: slotConfig.duration_minutes,
+                    max_participants: slotConfig.max_participants,
+                    min_participants: slotConfig.min_participants,
+                    guard_type: slotConfig.guard_type,
+                    description: slotConfig.description || null,
+                    status: 'open',
+                    created_by_member_id: req.user.member_id,
+                    scenario_id: scenario.scenario_id,
+                    auto_generated: true
+                });
+
+                res.status(201).json({
+                    success: true,
+                    message: 'Slot activated',
+                    data: guard
+                });
+
+            } else {
+                // Deactivate (cancel) guard
+                const guard = await Guard.findOne({
+                    where: {
+                        geo_id: geo_id,
+                        guard_date: date,
+                        start_time: start_time,
+                        status: { [Op.ne]: 'cancelled' }
+                    }
+                });
+
+                if (!guard) {
+                    return res.json({
+                        success: true,
+                        message: 'Slot already inactive'
+                    });
+                }
+
+                // Check for participants
+                const assignments = await GuardAssignment.count({
+                    where: {
+                        guard_id: guard.guard_id,
+                        status: 'confirmed'
+                    }
+                });
+
+                if (assignments > 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Cannot deactivate slot with ${assignments} registered participant(s)`,
+                        data: { participants: assignments }
+                    });
+                }
+
+                await guard.update({ status: 'cancelled' });
+
+                res.json({
+                    success: true,
+                    message: 'Slot deactivated'
+                });
+            }
+
+        } catch (error) {
+            logger.error('Error toggling slot', { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: 'Error toggling slot',
                 error: error.message
             });
         }

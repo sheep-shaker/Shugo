@@ -15,10 +15,14 @@ interface UsersState {
 
   // Actions
   fetchUsers: (params?: UsersListParams) => Promise<void>;
-  fetchUser: (id: string) => Promise<void>;
-  updateUser: (id: string, data: UpdateUserData) => Promise<void>;
-  deleteUser: (id: string) => Promise<void>;
-  restoreUser: (id: string) => Promise<void>;
+  fetchUser: (id: string | number) => Promise<void>;
+  updateUser: (id: string | number, data: UpdateUserData) => Promise<void>;
+  deleteUser: (id: string | number) => Promise<void>;
+  deleteUserPermanent: (id: string | number) => Promise<void>;
+  restoreUser: (id: string | number) => Promise<void>;
+  suspendUser: (id: string | number) => Promise<void>;
+  activateUser: (id: string | number) => Promise<void>;
+  deactivateUser: (id: string | number) => Promise<void>;
   clearError: () => void;
   clearCurrentUser: () => void;
 }
@@ -39,21 +43,24 @@ export const useUsersStore = create<UsersState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await usersService.getUsers(params);
+      console.log('[UsersStore] Fetched users:', response);
       set({
-        users: response.users,
-        pagination: response.pagination,
+        users: response.users || [],
+        pagination: response.pagination || { total: 0, page: 1, pages: 1, limit: 20 },
         isLoading: false,
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erreur lors du chargement des utilisateurs';
+    } catch (error: unknown) {
+      console.error('[UsersStore] Error fetching users:', error);
+      const apiError = error as { message?: string; error?: { message?: string } };
+      const message = apiError?.message || apiError?.error?.message || 'Erreur lors du chargement des utilisateurs';
       set({ error: message, isLoading: false });
     }
   },
 
-  fetchUser: async (id: string) => {
+  fetchUser: async (id: string | number) => {
     set({ isLoading: true, error: null });
     try {
-      const user = await usersService.getUser(id);
+      const user = await usersService.getUser(String(id));
       set({ currentUser: user, isLoading: false });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Utilisateur non trouvé';
@@ -61,10 +68,10 @@ export const useUsersStore = create<UsersState>((set) => ({
     }
   },
 
-  updateUser: async (id: string, data: UpdateUserData) => {
+  updateUser: async (id: string | number, data: UpdateUserData) => {
     set({ isLoading: true, error: null });
     try {
-      await usersService.updateUser(id, data);
+      await usersService.updateUser(String(id), data);
       // Refresh users list after update
       const response = await usersService.getUsers({});
       set({
@@ -79,12 +86,13 @@ export const useUsersStore = create<UsersState>((set) => ({
     }
   },
 
-  deleteUser: async (id: string) => {
+  deleteUser: async (id: number | string) => {
     set({ isLoading: true, error: null });
     try {
-      await usersService.deleteUser(id);
+      await usersService.deleteUser(String(id));
+      const numId = typeof id === 'string' ? parseInt(id) : id;
       set((state) => ({
-        users: state.users.filter((u) => u.member_id !== id),
+        users: state.users.filter((u) => u.member_id !== numId),
         isLoading: false,
       }));
     } catch (error) {
@@ -94,10 +102,10 @@ export const useUsersStore = create<UsersState>((set) => ({
     }
   },
 
-  restoreUser: async (id: string) => {
+  restoreUser: async (id: string | number) => {
     set({ isLoading: true, error: null });
     try {
-      await usersService.restoreUser(id);
+      await usersService.restoreUser(String(id));
       // Refresh users list after restore
       const response = await usersService.getUsers({});
       set({
@@ -107,6 +115,81 @@ export const useUsersStore = create<UsersState>((set) => ({
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erreur lors de la restauration';
+      set({ error: message, isLoading: false });
+      throw error;
+    }
+  },
+
+  suspendUser: async (id: string | number) => {
+    set({ isLoading: true, error: null });
+    try {
+      await usersService.suspendUser(String(id));
+      // Update user status in local state
+      const numId = typeof id === 'string' ? parseInt(id) : id;
+      set((state) => ({
+        users: state.users.map((u) =>
+          u.member_id === numId ? { ...u, status: 'suspended' as const } : u
+        ),
+        isLoading: false,
+      }));
+    } catch (error: unknown) {
+      const apiError = error as { message?: string; error?: { message?: string } };
+      const message = apiError?.message || apiError?.error?.message || 'Erreur lors de la suspension';
+      set({ error: message, isLoading: false });
+      throw error;
+    }
+  },
+
+  activateUser: async (id: string | number) => {
+    set({ isLoading: true, error: null });
+    try {
+      await usersService.activateUser(String(id));
+      const numId = typeof id === 'string' ? parseInt(id) : id;
+      set((state) => ({
+        users: state.users.map((u) =>
+          u.member_id === numId ? { ...u, status: 'active' as const } : u
+        ),
+        isLoading: false,
+      }));
+    } catch (error: unknown) {
+      const apiError = error as { message?: string; error?: { message?: string } };
+      const message = apiError?.message || apiError?.error?.message || 'Erreur lors de l\'activation';
+      set({ error: message, isLoading: false });
+      throw error;
+    }
+  },
+
+  deactivateUser: async (id: string | number) => {
+    set({ isLoading: true, error: null });
+    try {
+      await usersService.deactivateUser(String(id));
+      const numId = typeof id === 'string' ? parseInt(id) : id;
+      set((state) => ({
+        users: state.users.map((u) =>
+          u.member_id === numId ? { ...u, status: 'inactive' as const } : u
+        ),
+        isLoading: false,
+      }));
+    } catch (error: unknown) {
+      const apiError = error as { message?: string; error?: { message?: string } };
+      const message = apiError?.message || apiError?.error?.message || 'Erreur lors de la désactivation';
+      set({ error: message, isLoading: false });
+      throw error;
+    }
+  },
+
+  deleteUserPermanent: async (id: string | number) => {
+    set({ isLoading: true, error: null });
+    try {
+      await usersService.deleteUserPermanent(String(id));
+      const numId = typeof id === 'string' ? parseInt(id) : id;
+      set((state) => ({
+        users: state.users.filter((u) => u.member_id !== numId),
+        isLoading: false,
+      }));
+    } catch (error: unknown) {
+      const apiError = error as { message?: string; error?: { message?: string } };
+      const message = apiError?.message || apiError?.error?.message || 'Erreur lors de la suppression définitive';
       set({ error: message, isLoading: false });
       throw error;
     }

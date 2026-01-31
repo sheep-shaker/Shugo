@@ -158,8 +158,10 @@ class ReportGenerationJob {
       if (guard.current_participants === 0) stats.emptyGuards++;
       if (guard.status === 'cancelled') stats.cancelledGuards++;
 
-      // Stats par jour
-      const dayKey = guard.guard_date.toISOString().split('T')[0];
+      // Stats par jour - Handle both Date objects and string dates
+      const dayKey = typeof guard.guard_date === 'string'
+        ? guard.guard_date.split('T')[0]
+        : guard.guard_date.toISOString().split('T')[0];
       if (!stats.byDay[dayKey]) {
         stats.byDay[dayKey] = { guards: 0, participants: 0 };
       }

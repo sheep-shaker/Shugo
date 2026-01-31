@@ -42,13 +42,19 @@ const commonValidations = {
             .normalizeEmail()
             .withMessage('Please provide a valid email'),
     
-    // Password validation
-    password: () => 
+    // Password validation - sécurité maximale
+    password: () =>
         body('password')
             .isLength({ min: 8 })
-            .withMessage('Password must be at least 8 characters long')
-            .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-            .withMessage('Password must contain uppercase, lowercase, number and special character'),
+            .withMessage('Le mot de passe doit contenir au moins 8 caractères')
+            .matches(/[a-z]/)
+            .withMessage('Le mot de passe doit contenir au moins une lettre minuscule')
+            .matches(/[A-Z]/)
+            .withMessage('Le mot de passe doit contenir au moins une lettre majuscule')
+            .matches(/\d/)
+            .withMessage('Le mot de passe doit contenir au moins un chiffre')
+            .matches(/[@$!%*?&#^()_+\-=\[\]{}|;':",.<>\/\\`~]/)
+            .withMessage('Le mot de passe doit contenir au moins un caractère spécial (@$!%*?&#...)'),
     
     // Member ID validation
     memberId: (field = 'member_id') => 

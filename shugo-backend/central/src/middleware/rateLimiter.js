@@ -9,37 +9,38 @@ const config = require('../config');
 // Client Redis pour le stockage distribué
 let redisClient = null;
 
-// Limites par défaut
+// Limites par défaut (augmentées pour le développement)
+const isDev = process.env.NODE_ENV === 'development';
 const DEFAULT_LIMITS = {
   // Endpoints publics
-  public: { points: 100, duration: 60 }, // 100 req/min
-  
-  // Auth endpoints
-  login: { points: 5, duration: 60 }, // 5 tentatives/min
-  register: { points: 3, duration: 300 }, // 3 créations/5min
-  passwordReset: { points: 3, duration: 900 }, // 3 demandes/15min
-  
+  public: { points: isDev ? 1000 : 100, duration: 60 },
+
+  // Auth endpoints (augmentés pour dev)
+  login: { points: isDev ? 50 : 5, duration: 60 },
+  register: { points: isDev ? 30 : 3, duration: 300 },
+  passwordReset: { points: isDev ? 30 : 3, duration: 900 },
+
   // API générales
-  api: { points: 200, duration: 60 }, // 200 req/min
-  search: { points: 30, duration: 60 }, // 30 recherches/min
-  
+  api: { points: isDev ? 2000 : 200, duration: 60 },
+  search: { points: isDev ? 300 : 30, duration: 60 },
+
   // Opérations sensibles
-  vault: { points: 10, duration: 60 }, // 10 accès/min
-  backup: { points: 2, duration: 3600 }, // 2 sauvegardes/heure
-  admin: { points: 50, duration: 60 }, // 50 ops admin/min
-  
+  vault: { points: isDev ? 100 : 10, duration: 60 },
+  backup: { points: isDev ? 20 : 2, duration: 3600 },
+  admin: { points: isDev ? 500 : 50, duration: 60 },
+
   // Notifications
-  notification: { points: 20, duration: 60 }, // 20 notifs/min
-  email: { points: 5, duration: 60 }, // 5 emails/min
-  sms: { points: 2, duration: 60 }, // 2 SMS/min
-  
+  notification: { points: isDev ? 200 : 20, duration: 60 },
+  email: { points: isDev ? 50 : 5, duration: 60 },
+  sms: { points: isDev ? 20 : 2, duration: 60 },
+
   // Uploads
-  upload: { points: 10, duration: 300 }, // 10 uploads/5min
-  largeUpload: { points: 2, duration: 3600 }, // 2 gros fichiers/heure
-  
+  upload: { points: isDev ? 100 : 10, duration: 300 },
+  largeUpload: { points: isDev ? 20 : 2, duration: 3600 },
+
   // Exports
-  export: { points: 5, duration: 300 }, // 5 exports/5min
-  report: { points: 3, duration: 600 }, // 3 rapports/10min
+  export: { points: isDev ? 50 : 5, duration: 300 },
+  report: { points: isDev ? 30 : 3, duration: 600 },
 };
 
 // Stratégies de limitation
@@ -203,15 +204,15 @@ const rateLimiters = {
   login: createRateLimiter({
     ...DEFAULT_LIMITS.login,
     strategy: STRATEGIES.IP,
-    blockOnLimit: true,
-    blockDuration: 1800, // 30 minutes
+    blockOnLimit: !isDev, // Pas de blocage en dev
+    blockDuration: isDev ? 60 : 1800, // 1 min en dev, 30 min en prod
     message: 'Trop de tentatives de connexion'
   }),
 
   register: createRateLimiter({
     ...DEFAULT_LIMITS.register,
     strategy: STRATEGIES.IP,
-    blockOnLimit: true,
+    blockOnLimit: !isDev, // Pas de blocage en dev
     message: 'Trop de créations de compte'
   }),
 

@@ -4,18 +4,19 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Lock, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle, ArrowLeft, Check, X } from 'lucide-react';
 import { Button, Input, Card, Logo } from '@/components/ui';
 import { authService } from '@/services/auth.service';
 
-// Validation schema
+// Validation schema - must match backend requirements
 const resetSchema = z.object({
   password: z
     .string()
-    .min(8, 'Le mot de passe doit contenir au moins 8 caractères')
-    .regex(/[A-Z]/, 'Le mot de passe doit contenir au moins une majuscule')
-    .regex(/[a-z]/, 'Le mot de passe doit contenir au moins une minuscule')
-    .regex(/[0-9]/, 'Le mot de passe doit contenir au moins un chiffre'),
+    .min(8, 'Minimum 8 caractères')
+    .regex(/[a-z]/, 'Au moins une lettre minuscule requise')
+    .regex(/[A-Z]/, 'Au moins une lettre majuscule requise')
+    .regex(/[0-9]/, 'Au moins un chiffre requis')
+    .regex(/[@$!%*?&#^()_+\-=\[\]{}|;':",.<>\/\\`~]/, 'Au moins un caractère spécial requis'),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
   message: 'Les mots de passe ne correspondent pas',
@@ -39,6 +40,16 @@ export function ResetPasswordPage() {
       confirmPassword: '',
     },
   });
+
+  // Password validation in real-time
+  const password = form.watch('password') || '';
+  const passwordChecks = {
+    length: password.length >= 8,
+    lowercase: /[a-z]/.test(password),
+    uppercase: /[A-Z]/.test(password),
+    number: /[0-9]/.test(password),
+    special: /[@$!%*?&#^()_+\-=[\]{}|;':",.<>/\\`~]/.test(password),
+  };
 
   const onSubmit = async (data: ResetFormData) => {
     if (!token) {
@@ -117,15 +128,42 @@ export function ResetPasswordPage() {
               </div>
 
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <Input
-                  label="Nouveau mot de passe"
-                  type="password"
-                  placeholder="••••••••"
-                  leftIcon={<Lock className="h-5 w-5" />}
-                  error={form.formState.errors.password?.message}
-                  hint="Min. 8 caractères avec majuscule, minuscule et chiffre"
-                  {...form.register('password')}
-                />
+                <div>
+                  <Input
+                    label="Nouveau mot de passe"
+                    type="password"
+                    placeholder="••••••••"
+                    leftIcon={<Lock className="h-5 w-5" />}
+                    error={form.formState.errors.password?.message}
+                    {...form.register('password')}
+                  />
+                  {/* Password requirements guide */}
+                  <div className="mt-2 p-3 bg-marble-50 rounded-lg border border-marble-200">
+                    <p className="text-xs font-medium text-gray-600 mb-2">Exigences du mot de passe :</p>
+                    <div className="grid grid-cols-1 gap-1">
+                      <div className={`flex items-center gap-2 text-xs ${passwordChecks.length ? 'text-green-600' : 'text-gray-400'}`}>
+                        {passwordChecks.length ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                        <span>Au moins 8 caractères</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-xs ${passwordChecks.lowercase ? 'text-green-600' : 'text-gray-400'}`}>
+                        {passwordChecks.lowercase ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                        <span>Une lettre minuscule (a-z)</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-xs ${passwordChecks.uppercase ? 'text-green-600' : 'text-gray-400'}`}>
+                        {passwordChecks.uppercase ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                        <span>Une lettre majuscule (A-Z)</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-xs ${passwordChecks.number ? 'text-green-600' : 'text-gray-400'}`}>
+                        {passwordChecks.number ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                        <span>Un chiffre (0-9)</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-xs ${passwordChecks.special ? 'text-green-600' : 'text-gray-400'}`}>
+                        {passwordChecks.special ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                        <span>Un caractère spécial (@$!%*?&#...)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 <Input
                   label="Confirmer le mot de passe"

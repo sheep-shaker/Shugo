@@ -31,6 +31,7 @@ const NOTIFICATION_TYPES = {
   
   // Compte
   ACCOUNT_WELCOME: 'account_welcome',
+  ACCOUNT_EMAIL_VERIFICATION: 'account_email_verification',
   ACCOUNT_PASSWORD_RESET: 'account_password_reset',
   ACCOUNT_2FA_RESET: 'account_2fa_reset',
   ACCOUNT_BLOCKED: 'account_blocked',
@@ -636,6 +637,10 @@ class NotificationService {
         [NOTIFICATION_TYPES.ACCOUNT_WELCOME]: {
           title: 'Bienvenue sur SHUGO !',
           message: 'Votre compte a été créé avec succès. Vous pouvez maintenant vous connecter et consulter le planning des gardes.'
+        },
+        [NOTIFICATION_TYPES.ACCOUNT_EMAIL_VERIFICATION]: {
+          title: 'Vérification de votre email - SHUGO',
+          message: 'Bonjour {firstName},\n\nVotre code de vérification est : **{verificationCode}**\n\nCe code expire dans 30 minutes.\n\nSi vous n\'avez pas demandé ce code, ignorez cet email.'
         },
         [NOTIFICATION_TYPES.ACCOUNT_PASSWORD_RESET]: {
           title: 'Réinitialisation de mot de passe',

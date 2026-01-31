@@ -141,7 +141,11 @@ async function syncModels(options = {}) {
             require('../models/Notification'),
             require('../models/RegistrationToken'),
             require('../models/Guard'),
-            require('../models/GuardAssignment')
+            require('../models/GuardAssignment'),
+            require('../models/GuardScenario'),
+            require('../models/GuardSlot'),
+            require('../models/GuardLog'),
+            require('../models/WaitingList')
         ];
         
         // Create associations
@@ -336,6 +340,10 @@ function loadModels() {
     require('../models/RegistrationToken');
     require('../models/Guard');
     require('../models/GuardAssignment');
+    require('../models/GuardScenario');
+    require('../models/GuardSlot');
+    require('../models/GuardLog');
+    require('../models/WaitingList');
 
     // Setup associations
     setupAssociations();

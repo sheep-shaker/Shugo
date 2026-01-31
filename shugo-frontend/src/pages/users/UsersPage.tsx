@@ -21,6 +21,10 @@ import {
   Copy,
   Check,
   X,
+  Ban,
+  UserMinus,
+  Flame,
+  Power,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input, Badge, Avatar } from '@/components/ui';
 import { cn, getFullName, formatRole, formatDate } from '@/lib/utils';
@@ -42,13 +46,26 @@ const itemVariants = {
 };
 
 type FilterRole = 'all' | 'Admin_N1' | 'Admin' | 'Platinum' | 'Gold' | 'Silver';
-type FilterStatus = 'all' | 'active' | 'inactive' | 'suspended';
+type FilterStatus = 'all' | 'active' | 'inactive' | 'suspended' | 'pending_verification';
+
+// Available geo locations for filtering
+const GEO_LOCATIONS = [
+  { value: '', label: 'Tous les lieux' },
+  { value: '02-033-04-01-00', label: 'Nice' },
+  { value: '02-033-04-01-01', label: 'Cannes' },
+  { value: '02-033-04-01-02', label: 'Saint Raphaël' },
+];
 
 export function UsersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRole, setFilterRole] = useState<FilterRole>('all');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [filterGeoId, setFilterGeoId] = useState('');
+  const [filterFirstName, setFilterFirstName] = useState('');
+  const [filterLastName, setFilterLastName] = useState('');
+  const [filterMemberId, setFilterMemberId] = useState('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
   // Modal states
   const [showCreateTokenModal, setShowCreateTokenModal] = useState(false);
@@ -70,7 +87,18 @@ export function UsersPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  const { users, isLoading, error, pagination, fetchUsers, deleteUser } = useUsersStore();
+  const {
+    users,
+    isLoading,
+    error,
+    pagination,
+    fetchUsers,
+    deleteUser,
+    deleteUserPermanent,
+    suspendUser,
+    activateUser,
+    deactivateUser
+  } = useUsersStore();
 
   // Copy to clipboard helper
   const copyToClipboard = (text: string, label: string) => {
@@ -81,6 +109,12 @@ export function UsersPage() {
 
   // Create registration token
   const handleCreateToken = async () => {
+    // Validate required fields
+    if (!tokenForm.first_name.trim() || !tokenForm.last_name.trim()) {
+      setActionError('Le prénom et le nom sont obligatoires');
+      return;
+    }
+
     setActionLoading(true);
     setActionError(null);
     try {
@@ -132,18 +166,66 @@ export function UsersPage() {
   };
 
   useEffect(() => {
+    console.log('[UsersPage] Fetching users...');
     fetchUsers({ limit: 50 });
   }, [fetchUsers]);
 
-  const filteredUsers = users.filter((user) => {
-    const fullName = getFullName(user).toLowerCase();
+  // Debug: log users state changes
+  useEffect(() => {
+    console.log('[UsersPage] Users state:', { users, isLoading, error, pagination });
+  }, [users, isLoading, error, pagination]);
+
+  const filteredUsers = (users || []).filter((user) => {
+    const firstName = (user.first_name || '').toLowerCase();
+    const lastName = (user.last_name || '').toLowerCase();
+    const email = (user.email || '').toLowerCase();
+    const memberId = String(user.member_id);
+
+    // Basic search (matches name, email, or ID)
+    const searchLower = searchQuery.toLowerCase();
     const matchesSearch =
-      fullName.includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase());
+      !searchQuery ||
+      firstName.includes(searchLower) ||
+      lastName.includes(searchLower) ||
+      email.includes(searchLower) ||
+      memberId.includes(searchQuery);
+
+    // Role filter
     const matchesRole = filterRole === 'all' || user.role === filterRole;
+
+    // Status filter
     const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
-    return matchesSearch && matchesRole && matchesStatus;
+
+    // Advanced filters
+    const matchesFirstName = !filterFirstName || firstName.includes(filterFirstName.toLowerCase());
+    const matchesLastName = !filterLastName || lastName.includes(filterLastName.toLowerCase());
+    const matchesMemberId = !filterMemberId || memberId.includes(filterMemberId);
+    const matchesGeoId = !filterGeoId || user.geo_id === filterGeoId;
+
+    return matchesSearch && matchesRole && matchesStatus &&
+           matchesFirstName && matchesLastName && matchesMemberId && matchesGeoId;
   });
+
+  // Count active filters
+  const activeFiltersCount = [
+    filterRole !== 'all',
+    filterStatus !== 'all',
+    filterFirstName,
+    filterLastName,
+    filterMemberId,
+    filterGeoId
+  ].filter(Boolean).length;
+
+  // Reset all filters
+  const resetFilters = () => {
+    setSearchQuery('');
+    setFilterRole('all');
+    setFilterStatus('all');
+    setFilterFirstName('');
+    setFilterLastName('');
+    setFilterMemberId('');
+    setFilterGeoId('');
+  };
 
   const getRoleBadgeVariant = (role: string) => {
     const variants: Record<string, 'error' | 'warning' | 'info' | 'gold' | 'success'> = {
@@ -157,10 +239,12 @@ export function UsersPage() {
   };
 
   const getStatusBadgeVariant = (status: string) => {
-    const variants: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
+    const variants: Record<string, 'success' | 'warning' | 'error' | 'default' | 'info'> = {
       active: 'success',
       inactive: 'default',
       suspended: 'error',
+      pending_verification: 'warning',
+      deleted: 'error',
     };
     return variants[status] || 'default';
   };
@@ -170,6 +254,8 @@ export function UsersPage() {
       active: 'Actif',
       inactive: 'Inactif',
       suspended: 'Suspendu',
+      pending_verification: 'En attente',
+      deleted: 'Supprimé',
     };
     return labels[status] || status;
   };
@@ -269,6 +355,17 @@ export function UsersPage() {
         </motion.div>
       )}
 
+      {/* Debug Info - à supprimer après correction */}
+      {import.meta.env.DEV && (
+        <motion.div variants={itemVariants}>
+          <Card variant="default" padding="md" className="border-blue-200 bg-blue-50">
+            <p className="text-xs font-mono text-blue-700">
+              Debug: {users.length} utilisateurs chargés | Loading: {isLoading ? 'Oui' : 'Non'} | Filtré: {filteredUsers.length}
+            </p>
+          </Card>
+        </motion.div>
+      )}
+
       {/* Filters */}
       <motion.div variants={itemVariants}>
         <Card variant="default" padding="md">
@@ -276,41 +373,69 @@ export function UsersPage() {
             {/* Search */}
             <div className="flex-1">
               <Input
-                placeholder="Rechercher un utilisateur..."
+                placeholder="Rechercher par nom, email ou ID..."
                 leftIcon={<Search className="h-5 w-5" />}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            {/* Role Filter */}
-            <div className="flex gap-2 flex-wrap">
-              <div className="flex items-center gap-2 mr-2">
-                <Filter className="h-4 w-4 text-gray-400" />
-                <span className="text-sm text-gray-500">Rôle:</span>
-              </div>
-              {[
-                { value: 'all', label: 'Tous' },
-                { value: 'Admin_N1', label: 'Admin N1' },
-                { value: 'Admin', label: 'Admin' },
-                { value: 'Platinum', label: 'Platinum' },
-                { value: 'Gold', label: 'Gold' },
-                { value: 'Silver', label: 'Silver' },
-              ].map((filter) => (
-                <button
-                  key={filter.value}
-                  onClick={() => setFilterRole(filter.value as FilterRole)}
-                  className={cn(
-                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-                    filterRole === filter.value
-                      ? 'bg-gold-500 text-white'
-                      : 'bg-marble-100 text-gray-600 hover:bg-marble-200'
-                  )}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
+            {/* Toggle Advanced Filters */}
+            <button
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                showAdvancedFilters || activeFiltersCount > 0
+                  ? 'bg-gold-500 text-white'
+                  : 'bg-marble-100 text-gray-600 hover:bg-marble-200'
+              )}
+            >
+              <Filter className="h-4 w-4" />
+              Filtres avancés
+              {activeFiltersCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+            {activeFiltersCount > 0 && (
+              <button
+                onClick={resetFilters}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-all"
+              >
+                <X className="h-4 w-4" />
+                Réinitialiser
+              </button>
+            )}
           </div>
+
+          {/* Role Filter */}
+          <div className="flex gap-2 flex-wrap mt-3 pt-3 border-t border-marble-100">
+            <div className="flex items-center gap-2 mr-2">
+              <span className="text-sm text-gray-500">Rôle:</span>
+            </div>
+            {[
+              { value: 'all', label: 'Tous' },
+              { value: 'Admin_N1', label: 'Admin N1' },
+              { value: 'Admin', label: 'Admin' },
+              { value: 'Platinum', label: 'Platinum' },
+              { value: 'Gold', label: 'Gold' },
+              { value: 'Silver', label: 'Silver' },
+            ].map((filter) => (
+              <button
+                key={filter.value}
+                onClick={() => setFilterRole(filter.value as FilterRole)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                  filterRole === filter.value
+                    ? 'bg-gold-500 text-white'
+                    : 'bg-marble-100 text-gray-600 hover:bg-marble-200'
+                )}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+
           {/* Status Filter */}
           <div className="flex gap-2 flex-wrap mt-3 pt-3 border-t border-marble-100">
             <div className="flex items-center gap-2 mr-2">
@@ -321,6 +446,7 @@ export function UsersPage() {
               { value: 'active', label: 'Actifs' },
               { value: 'inactive', label: 'Inactifs' },
               { value: 'suspended', label: 'Suspendus' },
+              { value: 'pending_verification', label: 'En attente' },
             ].map((filter) => (
               <button
                 key={filter.value}
@@ -336,6 +462,78 @@ export function UsersPage() {
               </button>
             ))}
           </div>
+
+          {/* Advanced Filters Panel */}
+          {showAdvancedFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-4 pt-4 border-t border-marble-200"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* First Name Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Prénom
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Filtrer par prénom..."
+                    value={filterFirstName}
+                    onChange={(e) => setFilterFirstName(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-marble-200 rounded-lg focus:ring-2 focus:ring-gold-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Last Name Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Nom
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Filtrer par nom..."
+                    value={filterLastName}
+                    onChange={(e) => setFilterLastName(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-marble-200 rounded-lg focus:ring-2 focus:ring-gold-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Member ID Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    ID Membre
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Filtrer par ID..."
+                    value={filterMemberId}
+                    onChange={(e) => setFilterMemberId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-marble-200 rounded-lg focus:ring-2 focus:ring-gold-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Geo Location Filter */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Lieu / Zone
+                  </label>
+                  <select
+                    value={filterGeoId}
+                    onChange={(e) => setFilterGeoId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-marble-200 rounded-lg focus:ring-2 focus:ring-gold-500 focus:border-transparent"
+                  >
+                    {GEO_LOCATIONS.map((loc) => (
+                      <option key={loc.value} value={loc.value}>
+                        {loc.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </Card>
       </motion.div>
 
@@ -362,22 +560,25 @@ export function UsersPage() {
               <table className="w-full">
                 <thead>
                   <tr className="bg-marble-50 border-b border-marble-200">
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                    <th className="px-3 py-4 text-left text-sm font-semibold text-gray-700 w-16">
+                      ID
+                    </th>
+                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
                       Utilisateur
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
                       Email
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
                       Rôle
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
                       Statut
                     </th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-left text-sm font-semibold text-gray-700">
                       Zone
                     </th>
-                    <th className="px-6 py-4 text-right text-sm font-semibold text-gray-700">
+                    <th className="px-4 py-4 text-right text-sm font-semibold text-gray-700">
                       Actions
                     </th>
                   </tr>
@@ -385,40 +586,43 @@ export function UsersPage() {
                 <tbody className="divide-y divide-marble-100">
                   {filteredUsers.map((user) => (
                     <tr key={user.member_id} className="hover:bg-marble-50 transition-colors">
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-4">
+                        <span className="text-sm font-mono text-gray-500">#{user.member_id}</span>
+                      </td>
+                      <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
                           <Avatar
                             name={getFullName(user)}
                             size="md"
                           />
                           <div>
-                            <p className="font-medium text-gray-900">{getFullName(user)}</p>
+                            <p className="font-medium text-gray-900">{getFullName(user) || <span className="text-gray-400 italic">Sans nom</span>}</p>
                             <p className="text-sm text-gray-500">
                               Membre depuis {formatDate(user.created_at)}
                             </p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Mail className="h-4 w-4" />
-                          {user.email}
+                          {user.email || <span className="text-gray-400 italic">N/A</span>}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
                         <Badge variant={getRoleBadgeVariant(user.role)}>
                           {formatRole(user.role)}
                         </Badge>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
                         <Badge variant={getStatusBadgeVariant(user.status)} size="sm">
                           {getStatusLabel(user.status)}
                         </Badge>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4">
                         <span className="text-sm text-gray-600">{user.geo_id}</span>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-4 text-right">
                         <div className="relative inline-block">
                           <button
                             onClick={() => setOpenMenuId(openMenuId === user.member_id ? null : user.member_id)}
@@ -433,7 +637,7 @@ export function UsersPage() {
                                 className="fixed inset-0 z-10"
                                 onClick={() => setOpenMenuId(null)}
                               />
-                              <div className="absolute right-0 mt-1 w-52 bg-white rounded-xl shadow-lg border border-marble-200 py-1 z-20">
+                              <div className="absolute right-0 mt-1 w-56 bg-white rounded-xl shadow-lg border border-marble-200 py-1 z-20 max-h-96 overflow-y-auto">
                                 <button className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-marble-50 flex items-center gap-2">
                                   <Eye className="h-4 w-4" />
                                   Voir profil
@@ -458,10 +662,54 @@ export function UsersPage() {
                                   Réinitialiser 2FA
                                 </button>
                                 <div className="border-t border-marble-100 my-1" />
+                                {/* Status Actions */}
+                                {user.status !== 'active' && (
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm('Activer cet utilisateur ?')) {
+                                        await activateUser(user.member_id);
+                                        setOpenMenuId(null);
+                                      }
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm text-green-600 hover:bg-green-50 flex items-center gap-2"
+                                  >
+                                    <UserCheck className="h-4 w-4" />
+                                    Activer
+                                  </button>
+                                )}
+                                {user.status !== 'inactive' && user.status !== 'suspended' && (
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm('Désactiver cet utilisateur ?')) {
+                                        await deactivateUser(user.member_id);
+                                        setOpenMenuId(null);
+                                      }
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2"
+                                  >
+                                    <Power className="h-4 w-4" />
+                                    Désactiver
+                                  </button>
+                                )}
+                                {user.status !== 'suspended' && (
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm('Suspendre (blacklist) cet utilisateur ? Il ne pourra plus se connecter.')) {
+                                        await suspendUser(user.member_id);
+                                        setOpenMenuId(null);
+                                      }
+                                    }}
+                                    className="w-full px-4 py-2 text-left text-sm text-amber-600 hover:bg-amber-50 flex items-center gap-2"
+                                  >
+                                    <Ban className="h-4 w-4" />
+                                    Suspendre (Blacklist)
+                                  </button>
+                                )}
+                                <div className="border-t border-marble-100 my-1" />
                                 <button
-                                  onClick={() => {
-                                    if (confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')) {
-                                      deleteUser(user.member_id);
+                                  onClick={async () => {
+                                    if (confirm('Supprimer cet utilisateur ? (Soft delete - récupérable)')) {
+                                      await deleteUser(user.member_id);
                                       setOpenMenuId(null);
                                     }
                                   }}
@@ -469,6 +717,20 @@ export function UsersPage() {
                                 >
                                   <Trash2 className="h-4 w-4" />
                                   Supprimer
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm('⚠️ PROTOCOLE CENDRE BLANCHE ⚠️\n\nCette action est IRRÉVERSIBLE.\nToutes les données seront définitivement supprimées.\n\nÊtes-vous absolument certain ?')) {
+                                      if (confirm('DERNIÈRE CONFIRMATION\n\nTapez "CENDRE BLANCHE" pour confirmer la suppression définitive.') && prompt('Confirmez en tapant "CENDRE BLANCHE"') === 'CENDRE BLANCHE') {
+                                        await deleteUserPermanent(user.member_id);
+                                        setOpenMenuId(null);
+                                      }
+                                    }
+                                  }}
+                                  className="w-full px-4 py-2 text-left text-sm text-red-700 hover:bg-red-100 flex items-center gap-2 font-semibold"
+                                >
+                                  <Flame className="h-4 w-4" />
+                                  Cendre Blanche
                                 </button>
                               </div>
                             </>

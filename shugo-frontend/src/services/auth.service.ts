@@ -6,12 +6,19 @@ const AUTH_ENDPOINTS = {
   login: '/auth/login',
   register: '/auth/register',
   validateToken: '/auth/validate-token',
+  verifyEmail: '/auth/verify-email',
+  resendVerification: '/auth/resend-verification',
+  completeRegistration: '/auth/complete-registration',
   logout: '/auth/logout',
   refresh: '/auth/refresh',
   me: '/auth/me',
   verify2FA: '/auth/verify-2fa',
   resetPassword: '/auth/reset-password',
   resetPasswordConfirm: '/auth/reset-password-confirm',
+  // Self-service endpoints
+  requestPasswordResetSelf: '/auth/request-password-reset-self',
+  request2FAReset: '/auth/request-2fa-reset',
+  reset2FAConfirm: '/auth/reset-2fa-confirm',
 };
 
 // Interface pour la réponse de login du backend
@@ -69,16 +76,32 @@ interface TokenValidationResponse {
   };
 }
 
-// Interface pour la réponse d'inscription
+// Interface pour la réponse d'inscription (étape 1 - envoi email)
 interface RegisterResponse {
   success: boolean;
   message: string;
   data: {
     member_id: number;
+    email: string;
+    requires_email_verification: boolean;
+  };
+}
+
+// Interface pour la réponse de vérification email (étape 2 - retourne QR code)
+interface VerifyEmailResponse {
+  success: boolean;
+  message: string;
+  data: {
     qr_code: string;
     secret: string;
     backup_codes: string[];
   };
+}
+
+// Interface pour la réponse de completion (étape 3)
+interface CompleteRegistrationResponse {
+  success: boolean;
+  message: string;
 }
 
 // Données d'inscription
@@ -265,7 +288,7 @@ export const authService = {
   },
 
   /**
-   * Register new user with token
+   * Register new user with token (Step 1 - sends verification email)
    */
   async register(data: RegisterData): Promise<RegisterResponse['data']> {
     const response = await api.post<RegisterResponse>(AUTH_ENDPOINTS.register, data);
@@ -273,5 +296,78 @@ export const authService = {
       throw new Error('Registration failed');
     }
     return response.data.data;
+  },
+
+  /**
+   * Verify email with 6-digit code (Step 2 - returns QR code)
+   */
+  async verifyEmail(memberId: number, code: string): Promise<VerifyEmailResponse['data']> {
+    const response = await api.post<VerifyEmailResponse>(AUTH_ENDPOINTS.verifyEmail, {
+      member_id: memberId,
+      code
+    });
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Email verification failed');
+    }
+    return response.data.data;
+  },
+
+  /**
+   * Resend email verification code
+   */
+  async resendVerification(memberId: number): Promise<void> {
+    const response = await api.post<{ success: boolean; message: string }>(
+      AUTH_ENDPOINTS.resendVerification,
+      { member_id: memberId }
+    );
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to resend code');
+    }
+  },
+
+  /**
+   * Complete registration by verifying 2FA setup (Step 3 - final)
+   */
+  async completeRegistration(memberId: number, totpToken: string): Promise<void> {
+    const response = await api.post<CompleteRegistrationResponse>(
+      AUTH_ENDPOINTS.completeRegistration,
+      { member_id: memberId, totp_token: totpToken }
+    );
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to complete registration');
+    }
+  },
+
+  /**
+   * Request password reset for self (authenticated user)
+   */
+  async requestPasswordResetSelf(): Promise<void> {
+    await apiPost<ApiResponse<unknown>>(AUTH_ENDPOINTS.requestPasswordResetSelf);
+  },
+
+  /**
+   * Request 2FA reset for self (authenticated user)
+   */
+  async request2FAReset(): Promise<void> {
+    await apiPost<ApiResponse<unknown>>(AUTH_ENDPOINTS.request2FAReset);
+  },
+
+  /**
+   * Confirm 2FA reset with token
+   */
+  async reset2FAConfirm(token: string, password: string): Promise<{
+    qr_code: string;
+    secret: string;
+    backup_codes: string[];
+  }> {
+    const response = await apiPost<{
+      success: boolean;
+      data: {
+        qr_code: string;
+        secret: string;
+        backup_codes: string[];
+      };
+    }>(AUTH_ENDPOINTS.reset2FAConfirm, { token, password });
+    return response.data;
   },
 };

@@ -226,7 +226,10 @@ class GuardService {
     // Grouper par jour
     const byDay = {};
     guards.forEach(g => {
-      const dayKey = g.guard_date.toISOString().split('T')[0];
+      // Handle both Date objects and string dates (SQLite stores as strings)
+      const dayKey = typeof g.guard_date === 'string'
+        ? g.guard_date.split('T')[0]
+        : g.guard_date.toISOString().split('T')[0];
       if (!byDay[dayKey]) byDay[dayKey] = [];
       byDay[dayKey].push(this._formatGuardWithStatus(g));
     });
@@ -808,7 +811,10 @@ class GuardService {
     };
 
     guards.forEach(g => {
-      const dayKey = g.guard_date.toISOString().split('T')[0];
+      // Handle both Date objects and string dates (SQLite stores as strings)
+      const dayKey = typeof g.guard_date === 'string'
+        ? g.guard_date.split('T')[0]
+        : g.guard_date.toISOString().split('T')[0];
       if (!summary.byDay[dayKey]) {
         summary.byDay[dayKey] = { total: 0, covered: 0, partial: 0, empty: 0 };
       }

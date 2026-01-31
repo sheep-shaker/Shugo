@@ -135,12 +135,13 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       }>('/notifications', { params: { limit: 5, unreadOnly: true } });
 
       if (response.data.success) {
-        const alerts: Alert[] = response.data.data.notifications.map((n) => ({
+        const notifications = response.data.data?.notifications || [];
+        const alerts: Alert[] = notifications.map((n) => ({
           id: n.notification_id,
           type: n.priority === 'urgent' ? 'error' :
                 n.priority === 'high' ? 'warning' :
-                n.type.includes('success') ? 'success' : 'info',
-          message: n.message,
+                n.type?.includes('success') ? 'success' : 'info',
+          message: n.message || '',
           time: new Date(n.created_at),
         }));
         set({ alerts });

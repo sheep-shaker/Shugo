@@ -4,11 +4,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Key, Mail, User, Lock, Shield, ArrowRight, Check, Copy, QrCode } from 'lucide-react';
+import { Key, Mail, User, Lock, Shield, ArrowRight, Check, Copy, QrCode, X, RefreshCw } from 'lucide-react';
 import { Button, Input, Card, Logo, LanguageSelector } from '@/components/ui';
 import { authService } from '@/services/auth.service';
 
-// Validation schema
+// Validation schemas
 const tokenSchema = z.object({
   token: z.string().min(8, 'Jeton invalide'),
 });
@@ -17,26 +17,42 @@ const registerSchema = z.object({
   first_name: z.string().min(2, 'Prénom requis'),
   last_name: z.string().min(2, 'Nom requis'),
   email: z.string().email('Email invalide'),
-  password: z.string().min(8, 'Minimum 8 caractères'),
+  password: z.string()
+    .min(8, 'Minimum 8 caractères')
+    .regex(/[a-z]/, 'Au moins une lettre minuscule requise')
+    .regex(/[A-Z]/, 'Au moins une lettre majuscule requise')
+    .regex(/[0-9]/, 'Au moins un chiffre requis')
+    .regex(/[@$!%*?&#^()_+\-=\[\]{}|;':",.<>\/\\`~]/, 'Au moins un caractère spécial requis (@$!%*?&#...)'),
   confirm_password: z.string(),
 }).refine((data) => data.password === data.confirm_password, {
   message: 'Les mots de passe ne correspondent pas',
   path: ['confirm_password'],
 });
 
+const emailVerifySchema = z.object({
+  code: z.string().length(6, 'Le code doit contenir 6 chiffres').regex(/^\d+$/, 'Le code doit contenir uniquement des chiffres'),
+});
+
+const totpVerifySchema = z.object({
+  totp_code: z.string().length(6, 'Le code doit contenir 6 chiffres').regex(/^\d+$/, 'Le code doit contenir uniquement des chiffres'),
+});
+
 type TokenFormData = z.infer<typeof tokenSchema>;
 type RegisterFormData = z.infer<typeof registerSchema>;
+type EmailVerifyFormData = z.infer<typeof emailVerifySchema>;
+type TotpVerifyFormData = z.infer<typeof totpVerifySchema>;
 
 interface TwoFASetupData {
   qr_code: string;
   secret: string;
   backup_codes: string[];
-  member_id: number;
 }
+
+type RegistrationStep = 'token' | 'register' | 'email_verify' | '2fa_setup' | '2fa_verify' | 'success';
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<'token' | 'register' | '2fa_setup' | 'success'>('token');
+  const [step, setStep] = useState<RegistrationStep>('token');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokenData, setTokenData] = useState<{
@@ -45,32 +61,52 @@ export function RegisterPage() {
     role: string;
     geo_id: string;
   } | null>(null);
+  const [memberId, setMemberId] = useState<number | null>(null);
+  const [userEmail, setUserEmail] = useState<string>('');
   const [twoFAData, setTwoFAData] = useState<TwoFASetupData | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
-  // Token form
+  // Forms
   const tokenForm = useForm<TokenFormData>({
     resolver: zodResolver(tokenSchema),
     defaultValues: { token: '' },
   });
 
-  // Register form
   const registerForm = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
   });
 
-  // Handle token validation
+  const emailVerifyForm = useForm<EmailVerifyFormData>({
+    resolver: zodResolver(emailVerifySchema),
+    defaultValues: { code: '' },
+  });
+
+  const totpVerifyForm = useForm<TotpVerifyFormData>({
+    resolver: zodResolver(totpVerifySchema),
+    defaultValues: { totp_code: '' },
+  });
+
+  // Password validation in real-time
+  const password = registerForm.watch('password') || '';
+  const passwordChecks = {
+    length: password.length >= 8,
+    lowercase: /[a-z]/.test(password),
+    uppercase: /[A-Z]/.test(password),
+    number: /[0-9]/.test(password),
+    special: /[@$!%*?&#^()_+\-=[\]{}|;':",.<>/\\`~]/.test(password),
+  };
+
+  // Step 1: Token validation
   const onTokenSubmit = async (data: TokenFormData) => {
     setError(null);
     setIsLoading(true);
 
     try {
       const response = await authService.validateToken(data.token);
-
       setTokenData(response);
       registerForm.setValue('first_name', response.first_name || '');
       registerForm.setValue('last_name', response.last_name || '');
-
       setStep('register');
     } catch (err: unknown) {
       const apiError = err as { response?: { data?: { message?: string } } };
@@ -80,7 +116,7 @@ export function RegisterPage() {
     }
   };
 
-  // Handle registration
+  // Step 2: Registration form submission
   const onRegisterSubmit = async (data: RegisterFormData) => {
     setError(null);
     setIsLoading(true);
@@ -94,17 +130,20 @@ export function RegisterPage() {
         last_name: data.last_name,
       });
 
-      // Show 2FA setup
-      setTwoFAData({
-        qr_code: response.qr_code,
-        secret: response.secret,
-        backup_codes: response.backup_codes,
-        member_id: response.member_id,
-      });
-      setStep('2fa_setup');
+      setMemberId(response.member_id);
+      setUserEmail(data.email);
+      setStep('email_verify');
     } catch (err: unknown) {
-      const apiError = err as { response?: { data?: { message?: string; errors?: Array<{ message: string }> } } };
-      const errorMessage = apiError?.response?.data?.errors?.[0]?.message
+      const apiError = err as {
+        error?: { message?: string };
+        message?: string;
+        errors?: Array<{ message?: string; field?: string }>;
+        response?: { data?: { message?: string; errors?: Array<{ message: string }> } };
+      };
+      const errorMessage = apiError?.errors?.[0]?.message
+        || apiError?.error?.message
+        || apiError?.message
+        || apiError?.response?.data?.errors?.[0]?.message
         || apiError?.response?.data?.message
         || 'Erreur lors de la création du compte';
       setError(errorMessage);
@@ -113,14 +152,75 @@ export function RegisterPage() {
     }
   };
 
-  // Copy backup code to clipboard
+  // Step 3: Email verification
+  const onEmailVerifySubmit = async (data: EmailVerifyFormData) => {
+    if (!memberId) return;
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const response = await authService.verifyEmail(memberId, data.code);
+      setTwoFAData({
+        qr_code: response.qr_code,
+        secret: response.secret,
+        backup_codes: response.backup_codes,
+      });
+      setStep('2fa_setup');
+    } catch (err: unknown) {
+      const apiError = err as { message?: string; response?: { data?: { message?: string } } };
+      setError(apiError?.response?.data?.message || apiError?.message || 'Code de vérification incorrect');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Resend verification code
+  const handleResendCode = async () => {
+    if (!memberId || resendCooldown > 0) return;
+    setError(null);
+
+    try {
+      await authService.resendVerification(memberId);
+      setResendCooldown(60);
+      const interval = setInterval(() => {
+        setResendCooldown((prev) => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (err: unknown) {
+      const apiError = err as { message?: string };
+      setError(apiError?.message || 'Erreur lors du renvoi du code');
+    }
+  };
+
+  // Step 5: 2FA verification (after viewing QR code)
+  const onTotpVerifySubmit = async (data: TotpVerifyFormData) => {
+    if (!memberId) return;
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      await authService.completeRegistration(memberId, data.totp_code);
+      setStep('success');
+    } catch (err: unknown) {
+      const apiError = err as { message?: string; response?: { data?: { message?: string } } };
+      setError(apiError?.response?.data?.message || apiError?.message || 'Code 2FA incorrect');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Copy to clipboard helpers
   const copyToClipboard = (code: string) => {
     navigator.clipboard.writeText(code);
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
-  // Copy all backup codes
   const copyAllCodes = () => {
     if (twoFAData?.backup_codes) {
       navigator.clipboard.writeText(twoFAData.backup_codes.join('\n'));
@@ -138,7 +238,6 @@ export function RegisterPage() {
 
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-gold-500 via-gold-600 to-gold-700 relative overflow-hidden">
-        {/* Decorative patterns */}
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-0 left-0 w-full h-full">
             <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -150,7 +249,6 @@ export function RegisterPage() {
           </div>
         </div>
 
-        {/* Content */}
         <div className="relative z-10 flex flex-col justify-center items-center p-12 text-white">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -171,7 +269,6 @@ export function RegisterPage() {
             <div className="w-32 h-1 bg-white/30 mx-auto rounded-full" />
           </motion.div>
 
-          {/* Decorative corners */}
           <div className="absolute top-8 left-8 w-16 h-16 border-t-2 border-l-2 border-white/30 rounded-tl-2xl" />
           <div className="absolute top-8 right-8 w-16 h-16 border-t-2 border-r-2 border-white/30 rounded-tr-2xl" />
           <div className="absolute bottom-8 left-8 w-16 h-16 border-b-2 border-l-2 border-white/30 rounded-bl-2xl" />
@@ -186,13 +283,11 @@ export function RegisterPage() {
           animate={{ opacity: 1, x: 0 }}
           className="w-full max-w-md"
         >
-          {/* Logo mobile */}
           <div className="lg:hidden mb-8 text-center">
             <Logo size="lg" />
           </div>
 
           <Card variant="elevated" padding="lg" className="relative">
-            {/* Decorative gold corners */}
             <div className="absolute top-0 left-0 w-12 h-12 border-t-2 border-l-2 border-gold-400 rounded-tl-2xl" />
             <div className="absolute top-0 right-0 w-12 h-12 border-t-2 border-r-2 border-gold-400 rounded-tr-2xl" />
             <div className="absolute bottom-0 left-0 w-12 h-12 border-b-2 border-l-2 border-gold-400 rounded-bl-2xl" />
@@ -217,7 +312,7 @@ export function RegisterPage() {
                   <Input
                     label="Jeton d'invitation"
                     type="text"
-                    placeholder="XXXXXXXX-XXXX-XXXX"
+                    placeholder="XXXX-XXXX-XXXX-XXXX"
                     leftIcon={<Key className="h-5 w-5" />}
                     error={tokenForm.formState.errors.token?.message}
                     {...tokenForm.register('token')}
@@ -290,14 +385,41 @@ export function RegisterPage() {
                     {...registerForm.register('email')}
                   />
 
-                  <Input
-                    label="Mot de passe"
-                    type="password"
-                    placeholder="••••••••"
-                    leftIcon={<Lock className="h-5 w-5" />}
-                    error={registerForm.formState.errors.password?.message}
-                    {...registerForm.register('password')}
-                  />
+                  <div>
+                    <Input
+                      label="Mot de passe"
+                      type="password"
+                      placeholder="••••••••"
+                      leftIcon={<Lock className="h-5 w-5" />}
+                      error={registerForm.formState.errors.password?.message}
+                      {...registerForm.register('password')}
+                    />
+                    <div className="mt-2 p-3 bg-marble-50 rounded-lg border border-marble-200">
+                      <p className="text-xs font-medium text-gray-600 mb-2">Exigences du mot de passe :</p>
+                      <div className="grid grid-cols-1 gap-1">
+                        <div className={`flex items-center gap-2 text-xs ${passwordChecks.length ? 'text-green-600' : 'text-gray-400'}`}>
+                          {passwordChecks.length ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                          <span>Au moins 8 caractères</span>
+                        </div>
+                        <div className={`flex items-center gap-2 text-xs ${passwordChecks.lowercase ? 'text-green-600' : 'text-gray-400'}`}>
+                          {passwordChecks.lowercase ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                          <span>Une lettre minuscule (a-z)</span>
+                        </div>
+                        <div className={`flex items-center gap-2 text-xs ${passwordChecks.uppercase ? 'text-green-600' : 'text-gray-400'}`}>
+                          {passwordChecks.uppercase ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                          <span>Une lettre majuscule (A-Z)</span>
+                        </div>
+                        <div className={`flex items-center gap-2 text-xs ${passwordChecks.number ? 'text-green-600' : 'text-gray-400'}`}>
+                          {passwordChecks.number ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                          <span>Un chiffre (0-9)</span>
+                        </div>
+                        <div className={`flex items-center gap-2 text-xs ${passwordChecks.special ? 'text-green-600' : 'text-gray-400'}`}>
+                          {passwordChecks.special ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                          <span>Un caractère spécial (@$!%*?&#...)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                   <Input
                     label="Confirmer le mot de passe"
@@ -332,7 +454,72 @@ export function RegisterPage() {
               </>
             )}
 
-            {/* Step 3: 2FA Setup */}
+            {/* Step 3: Email verification */}
+            {step === 'email_verify' && (
+              <>
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
+                    <Mail className="h-8 w-8 text-blue-600" />
+                  </div>
+                  <h2 className="text-2xl font-display font-semibold text-gray-900 mb-2">
+                    Vérifiez votre email
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    Un code à 6 chiffres a été envoyé à<br />
+                    <span className="font-medium text-gray-700">{userEmail}</span>
+                  </p>
+                </div>
+
+                <form onSubmit={emailVerifyForm.handleSubmit(onEmailVerifySubmit)} className="space-y-6">
+                  <Input
+                    label="Code de vérification"
+                    type="text"
+                    placeholder="000000"
+                    maxLength={6}
+                    className="text-center text-2xl tracking-widest"
+                    error={emailVerifyForm.formState.errors.code?.message}
+                    {...emailVerifyForm.register('code')}
+                  />
+
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm"
+                    >
+                      {error}
+                    </motion.div>
+                  )}
+
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="lg"
+                    className="w-full"
+                    isLoading={isLoading}
+                    rightIcon={<ArrowRight className="h-5 w-5" />}
+                  >
+                    Vérifier
+                  </Button>
+
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={handleResendCode}
+                      disabled={resendCooldown > 0}
+                      className="text-sm text-gold-600 hover:text-gold-700 disabled:text-gray-400 flex items-center justify-center gap-2 mx-auto"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      {resendCooldown > 0
+                        ? `Renvoyer dans ${resendCooldown}s`
+                        : 'Renvoyer le code'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+
+            {/* Step 4: 2FA Setup (show QR code) */}
             {step === '2fa_setup' && twoFAData && (
               <div className="py-4">
                 <div className="text-center mb-6">
@@ -347,14 +534,12 @@ export function RegisterPage() {
                   </p>
                 </div>
 
-                {/* QR Code */}
                 <div className="flex justify-center mb-6">
                   <div className="p-4 bg-white rounded-xl shadow-md">
                     <img src={twoFAData.qr_code} alt="QR Code 2FA" className="w-48 h-48" />
                   </div>
                 </div>
 
-                {/* Secret key (fallback) */}
                 <div className="mb-6">
                   <p className="text-xs text-gray-500 mb-2 text-center">Ou entrez manuellement ce code :</p>
                   <div className="flex items-center justify-center gap-2 p-3 bg-gray-100 rounded-lg">
@@ -368,7 +553,6 @@ export function RegisterPage() {
                   </div>
                 </div>
 
-                {/* Backup codes */}
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-medium text-gray-700">Codes de secours</p>
@@ -401,15 +585,73 @@ export function RegisterPage() {
                   variant="primary"
                   size="lg"
                   className="w-full"
-                  onClick={() => setStep('success')}
+                  onClick={() => setStep('2fa_verify')}
                   rightIcon={<ArrowRight className="h-5 w-5" />}
                 >
-                  J'ai sauvegardé mes codes
+                  J'ai configuré mon application
                 </Button>
               </div>
             )}
 
-            {/* Step 4: Success */}
+            {/* Step 5: 2FA Verification */}
+            {step === '2fa_verify' && (
+              <>
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-2xl flex items-center justify-center">
+                    <Shield className="h-8 w-8 text-green-600" />
+                  </div>
+                  <h2 className="text-2xl font-display font-semibold text-gray-900 mb-2">
+                    Vérification 2FA
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    Entrez le code affiché dans votre application d'authentification pour terminer l'inscription
+                  </p>
+                </div>
+
+                <form onSubmit={totpVerifyForm.handleSubmit(onTotpVerifySubmit)} className="space-y-6">
+                  <Input
+                    label="Code 2FA"
+                    type="text"
+                    placeholder="000000"
+                    maxLength={6}
+                    className="text-center text-2xl tracking-widest"
+                    error={totpVerifyForm.formState.errors.totp_code?.message}
+                    {...totpVerifyForm.register('totp_code')}
+                  />
+
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm"
+                    >
+                      {error}
+                    </motion.div>
+                  )}
+
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="lg"
+                    className="w-full"
+                    isLoading={isLoading}
+                    rightIcon={<Check className="h-5 w-5" />}
+                  >
+                    Terminer l'inscription
+                  </Button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStep('2fa_setup')}
+                    className="w-full text-sm text-gray-500 hover:text-gray-700"
+                  >
+                    Retour au QR code
+                  </button>
+                </form>
+              </>
+            )}
+
+            {/* Step 6: Success */}
             {step === 'success' && (
               <div className="text-center py-8">
                 <motion.div

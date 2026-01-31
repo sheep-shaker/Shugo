@@ -148,8 +148,25 @@ const User = sequelize.define('User', {
     
     // Status
     status: {
-        type: DataTypes.ENUM('active', 'inactive', 'suspended', 'deleted'),
-        defaultValue: 'active'
+        type: DataTypes.ENUM('active', 'inactive', 'suspended', 'deleted', 'pending_verification'),
+        defaultValue: 'pending_verification'
+    },
+
+    // Email verification
+    email_verified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
+    },
+
+    email_verification_code: {
+        type: DataTypes.STRING(6),
+        allowNull: true,
+        comment: 'Code de vérification email à 6 chiffres'
+    },
+
+    email_verification_expires: {
+        type: DataTypes.DATE,
+        allowNull: true
     },
     
     // Preferences
@@ -367,14 +384,16 @@ User.prototype.getPublicProfile = function() {
 };
 
 // Class methods
-User.findByEmail = async function(email) {
+User.findByEmail = async function(email, options = {}) {
+    const { includeInactive = false } = options;
     const emailHash = cryptoManager.hashForSearch(email);
-    return await this.findOne({ 
-        where: { 
-            email_hash: emailHash,
-            status: 'active'
-        } 
-    });
+    const where = { email_hash: emailHash };
+
+    if (!includeInactive) {
+        where.status = 'active';
+    }
+
+    return await this.findOne({ where });
 };
 
 User.findByPhonetic = async function(firstName, lastName) {

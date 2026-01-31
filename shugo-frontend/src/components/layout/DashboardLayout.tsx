@@ -7,7 +7,6 @@ import {
   Calendar,
   Shield,
   Bell,
-  Settings,
   LogOut,
   Menu,
   X,
@@ -16,6 +15,8 @@ import {
   FileText,
   BarChart3,
   UserCog,
+  Settings,
+  User,
 } from 'lucide-react';
 import { Logo, Avatar, Badge } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
@@ -188,17 +189,12 @@ export function DashboardLayout() {
             {/* Right Actions */}
             <div className="flex items-center gap-2">
               {/* Notifications */}
-              <button className="relative p-2 rounded-xl hover:bg-marble-100 transition-colors">
+              <button
+                onClick={() => navigate('/notifications')}
+                className="relative p-2 rounded-xl hover:bg-marble-100 transition-colors"
+              >
                 <Bell className="h-5 w-5 text-gray-600" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-              </button>
-
-              {/* Settings */}
-              <button
-                onClick={() => navigate('/settings')}
-                className="p-2 rounded-xl hover:bg-marble-100 transition-colors"
-              >
-                <Settings className="h-5 w-5 text-gray-600" />
               </button>
 
               {/* User Menu */}
@@ -237,8 +233,9 @@ export function DashboardLayout() {
                             navigate('/profile');
                             setUserMenuOpen(false);
                           }}
-                          className="w-full px-4 py-2 text-left text-gray-700 hover:bg-marble-50 transition-colors"
+                          className="w-full px-4 py-2 text-left text-gray-700 hover:bg-marble-50 transition-colors flex items-center gap-2"
                         >
+                          <User className="h-4 w-4" />
                           Mon profil
                         </button>
                         <button
@@ -246,8 +243,9 @@ export function DashboardLayout() {
                             navigate('/settings');
                             setUserMenuOpen(false);
                           }}
-                          className="w-full px-4 py-2 text-left text-gray-700 hover:bg-marble-50 transition-colors"
+                          className="w-full px-4 py-2 text-left text-gray-700 hover:bg-marble-50 transition-colors flex items-center gap-2"
                         >
+                          <Settings className="h-4 w-4" />
                           Paramètres
                         </button>
                       </div>

@@ -211,4 +211,139 @@ export const guardsService = {
     });
     return response.data.data;
   },
+
+  // =========================================
+  // SLOT MANAGEMENT (30-minute blocks)
+  // =========================================
+
+  /**
+   * Get available guard scenarios for a location
+   */
+  async getScenarios(geoId?: string): Promise<GuardScenario[]> {
+    const response = await api.get<{ success: boolean; data: GuardScenario[] }>('/guards/scenarios', {
+      params: { geo_id: geoId }
+    });
+    return response.data.data;
+  },
+
+  /**
+   * Get guard slots for a date range
+   */
+  async getSlots(startDate: string, endDate: string, geoId?: string): Promise<SlotsResponse> {
+    const response = await api.get<{ success: boolean; data: SlotsResponse }>('/guards/slots', {
+      params: { start_date: startDate, end_date: endDate, geo_id: geoId }
+    });
+    return response.data.data;
+  },
+
+  /**
+   * Activate guard slots for a date range
+   */
+  async activateSlots(params: {
+    startDate: string;
+    endDate: string;
+    geoId: string;
+    slotIndices?: number[];
+    includeNight?: boolean;
+  }): Promise<Guard[]> {
+    const response = await api.post<{ success: boolean; data: Guard[] }>('/guards/slots/activate', {
+      start_date: params.startDate,
+      end_date: params.endDate,
+      geo_id: params.geoId,
+      slot_indices: params.slotIndices,
+      include_night: params.includeNight
+    });
+    return response.data.data;
+  },
+
+  /**
+   * Deactivate guard slots for a date range
+   */
+  async deactivateSlots(params: {
+    startDate: string;
+    endDate: string;
+    geoId: string;
+    slotIndices?: number[];
+    includeNight?: boolean;
+    reason?: string;
+  }): Promise<{ cancelled_count: number; skipped_count: number; skipped: Array<{ guard_id: string; participants: number }> }> {
+    const response = await api.post<{ success: boolean; data: { cancelled_count: number; skipped_count: number; skipped: Array<{ guard_id: string; participants: number }> } }>('/guards/slots/deactivate', {
+      start_date: params.startDate,
+      end_date: params.endDate,
+      geo_id: params.geoId,
+      slot_indices: params.slotIndices,
+      include_night: params.includeNight,
+      reason: params.reason
+    });
+    return response.data.data;
+  },
+
+  /**
+   * Toggle a single guard slot
+   */
+  async toggleSlot(date: string, startTime: string, geoId: string, activate: boolean): Promise<Guard | null> {
+    const response = await api.post<{ success: boolean; data?: Guard }>('/guards/slots/toggle', {
+      date,
+      start_time: startTime,
+      geo_id: geoId,
+      activate
+    });
+    return response.data.data || null;
+  },
 };
+
+// Additional types for slot management
+export interface GuardScenario {
+  scenario_id: string;
+  name: string;
+  description?: string;
+  geo_id: string;
+  scenario_type: 'daily' | 'weekly' | 'monthly' | 'special';
+  code: string;
+  template_data: {
+    slot_duration: number;
+    day_start: string;
+    day_end: string;
+    night_start: string;
+    night_end: string;
+    slots: SlotTemplate[];
+    night_slot?: SlotTemplate;
+    weekday_config: Record<number, { enabled: boolean; label: string }>;
+  };
+  is_default: boolean;
+  is_active: boolean;
+}
+
+export interface SlotTemplate {
+  slot_index: number;
+  start_time: string;
+  end_time: string;
+  guard_type: string;
+  duration_minutes: number;
+  max_participants: number;
+  min_participants: number;
+  enabled: boolean;
+  is_night?: boolean;
+  description?: string;
+}
+
+export interface SlotWithStatus extends SlotTemplate {
+  activated: boolean;
+  guard_id: string | null;
+  current_participants: number;
+  status: 'open' | 'full' | 'closed' | 'cancelled' | 'inactive';
+}
+
+export interface DaySlots {
+  date: string;
+  day_of_week: number;
+  day_label: string;
+  slots: SlotWithStatus[];
+  night_slot: SlotWithStatus | null;
+}
+
+export interface SlotsResponse {
+  scenario: GuardScenario;
+  slots_by_date: Record<string, DaySlots>;
+  total_days: number;
+}

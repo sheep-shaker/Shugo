@@ -66,9 +66,20 @@ app.use(express.urlencoded({ extended: true, limit: config.server.bodyLimit }));
 // Cookie parser
 app.use(cookieParser(config.security.cookieSecret));
 
-// Rate limiting
-const limiter = rateLimit(config.rateLimit);
-app.use('/api/', limiter);
+// Rate limiting - disabled in development for easier testing
+if (config.isProd) {
+    const limiter = rateLimit({
+        windowMs: config.security.rateLimit.windowMs,
+        max: config.security.rateLimit.max,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many requests, please try again later.' }
+    });
+    app.use('/api/', limiter);
+    logger.info('Rate limiting enabled for production');
+} else {
+    logger.info('Rate limiting DISABLED for development');
+}
 
 // Request logging
 app.use((req, res, next) => {
@@ -159,6 +170,15 @@ async function startServer() {
             // Use force:false to only create missing tables without altering existing ones
             await syncModels({ force: false });
             logger.info('📊 Database models synchronized');
+
+            // Seed default guard scenarios
+            try {
+                const { seedGuardScenarios } = require('./seeders/guardScenarios');
+                await seedGuardScenarios(sequelize);
+                logger.info('📋 Guard scenarios seeded');
+            } catch (seedError) {
+                logger.warn('Guard scenarios seeding skipped:', seedError.message);
+            }
         }
         
         // Start scheduler (legacy) - DISABLED FOR TESTING (SQLite BUSY issue)

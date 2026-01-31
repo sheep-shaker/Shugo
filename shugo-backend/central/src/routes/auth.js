@@ -69,43 +69,52 @@ router.post('/validate-token',
 
 /**
  * POST /api/v1/auth/register
- * Register a new user with token
+ * Register a new user with token - Step 1: Create user and send verification email
  */
-router.post('/register', 
+router.post('/register',
     validationRules.auth.register,
     asyncHandler(async (req, res) => {
         const { token, email, password, first_name, last_name, phone } = req.body;
-        
+
         // Start transaction
         const transaction = await sequelize.transaction();
-        
+
         try {
             // Verify registration token
             const regToken = await RegistrationToken.findOne({
-                where: { 
+                where: {
                     token_code: token,
                     status: 'active',
                     expires_at: { [Op.gt]: new Date() }
                 },
                 transaction
             });
-            
+
             if (!regToken) {
                 await transaction.rollback();
                 throw new AppError('Invalid or expired registration token', 400);
             }
-            
-            // Check if email already exists
-            const existingUser = await User.findByEmail(email);
+
+            // Check if email already exists (including pending users)
+            const emailHash = cryptoManager.hashForSearch(email);
+            const existingUser = await User.findOne({
+                where: { email_hash: emailHash },
+                paranoid: false,
+                transaction
+            });
+
             if (existingUser) {
                 await transaction.rollback();
                 throw new AppError('Email already registered', 409);
             }
-            
+
             // Get next available member_id
             const member_id = await User.getNextAvailableId();
-            
-            // Create user
+
+            // Generate 6-digit verification code
+            const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+            // Create user with pending status
             const user = await User.create({
                 member_id,
                 email_encrypted: email,
@@ -116,33 +125,51 @@ router.post('/register',
                 role: regToken.target_role || 'Silver',
                 geo_id: regToken.geo_id,
                 group_id: regToken.target_group_id || null,
-                status: 'active'
+                status: 'pending_verification',
+                email_verified: false,
+                email_verification_code: verificationCode,
+                email_verification_expires: new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
             }, { transaction });
-            
-            // Generate 2FA secret
-            const secret = speakeasy.generateSecret({
-                name: `SHUGO (${email})`,
-                issuer: 'SHUGO System'
-            });
-            
-            user.totp_secret_encrypted = secret.base32;
-            await user.save({ transaction });
-            
-            // Generate QR code
-            const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
-            
+
             // Mark token as used
             regToken.status = 'used';
             regToken.used_at = new Date();
             regToken.used_by_member_id = member_id;
             await regToken.save({ transaction });
-            
+
             await transaction.commit();
 
-            // Log registration (non-blocking to avoid SQLITE_BUSY)
+            // Send verification email (non-blocking)
+            try {
+                const notificationService = new NotificationService({
+                    Notification,
+                    User,
+                    AuditLog
+                });
+                await notificationService.initialize();
+
+                await notificationService.send(
+                    member_id,
+                    'account_email_verification',
+                    {
+                        verificationCode,
+                        firstName: first_name
+                    },
+                    { channel: 'email', immediate: true }
+                );
+
+                logger.info('Verification email sent', { member_id, email });
+            } catch (emailError) {
+                logger.error('Failed to send verification email', {
+                    member_id,
+                    error: emailError.message
+                });
+            }
+
+            // Log registration start
             AuditLog.logAction({
                 member_id,
-                action: 'REGISTER',
+                action: 'REGISTER_START',
                 resource_type: 'user',
                 resource_id: member_id.toString(),
                 ip_address: req.ip,
@@ -150,22 +177,213 @@ router.post('/register',
                 result: 'success',
                 category: 'auth'
             }).catch(err => logger.warn('Failed to log registration:', err.message));
-            
+
             res.status(201).json({
                 success: true,
-                message: 'Registration successful. Please set up 2FA.',
+                message: 'Compte créé. Vérifiez votre email pour le code de confirmation.',
                 data: {
                     member_id,
-                    qr_code: qrCodeUrl,
-                    secret: secret.base32,
-                    backup_codes: await generateBackupCodes(user)
+                    email,
+                    requires_email_verification: true
                 }
             });
-            
+
         } catch (error) {
             await transaction.rollback();
             throw error;
         }
+    })
+);
+
+/**
+ * POST /api/v1/auth/verify-email
+ * Verify email with 6-digit code - Step 2
+ */
+router.post('/verify-email',
+    asyncHandler(async (req, res) => {
+        const { member_id, code } = req.body;
+
+        if (!member_id || !code) {
+            throw new AppError('Member ID and verification code are required', 400);
+        }
+
+        const user = await User.findByPk(member_id);
+
+        if (!user) {
+            throw new AppError('Utilisateur non trouvé', 404);
+        }
+
+        if (user.email_verified) {
+            throw new AppError('Email déjà vérifié', 400);
+        }
+
+        if (user.email_verification_expires && new Date() > new Date(user.email_verification_expires)) {
+            throw new AppError('Code expiré. Veuillez demander un nouveau code.', 400);
+        }
+
+        if (user.email_verification_code !== code) {
+            throw new AppError('Code de vérification incorrect', 400);
+        }
+
+        // Email verified - generate 2FA secret
+        const email = user.email_encrypted;
+        const secret = speakeasy.generateSecret({
+            name: `SHUGO (${email})`,
+            issuer: 'SHUGO System'
+        });
+
+        user.email_verified = true;
+        user.email_verification_code = null;
+        user.email_verification_expires = null;
+        user.totp_secret_encrypted = secret.base32;
+        await user.save();
+
+        // Generate QR code
+        const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+        // Generate backup codes
+        const backupCodes = await generateBackupCodes(user);
+
+        logger.info('Email verified, 2FA setup started', { member_id });
+
+        res.json({
+            success: true,
+            message: 'Email vérifié. Configurez maintenant votre 2FA.',
+            data: {
+                qr_code: qrCodeUrl,
+                secret: secret.base32,
+                backup_codes: backupCodes
+            }
+        });
+    })
+);
+
+/**
+ * POST /api/v1/auth/resend-verification
+ * Resend email verification code
+ */
+router.post('/resend-verification',
+    asyncHandler(async (req, res) => {
+        const { member_id } = req.body;
+
+        if (!member_id) {
+            throw new AppError('Member ID required', 400);
+        }
+
+        const user = await User.findByPk(member_id);
+
+        if (!user) {
+            throw new AppError('Utilisateur non trouvé', 404);
+        }
+
+        if (user.email_verified) {
+            throw new AppError('Email déjà vérifié', 400);
+        }
+
+        // Generate new code
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        user.email_verification_code = verificationCode;
+        user.email_verification_expires = new Date(Date.now() + 30 * 60 * 1000);
+        await user.save();
+
+        // Send verification email
+        try {
+            const notificationService = new NotificationService({
+                Notification,
+                User,
+                AuditLog
+            });
+            await notificationService.initialize();
+
+            await notificationService.send(
+                member_id,
+                'account_email_verification',
+                {
+                    verificationCode,
+                    firstName: user.first_name_encrypted
+                },
+                { channel: 'email', immediate: true }
+            );
+
+            logger.info('Verification email resent', { member_id });
+        } catch (emailError) {
+            logger.error('Failed to resend verification email', {
+                member_id,
+                error: emailError.message
+            });
+            throw new AppError('Échec de l\'envoi de l\'email', 500);
+        }
+
+        res.json({
+            success: true,
+            message: 'Nouveau code envoyé par email'
+        });
+    })
+);
+
+/**
+ * POST /api/v1/auth/complete-registration
+ * Complete registration by verifying 2FA setup - Step 3 (final)
+ */
+router.post('/complete-registration',
+    asyncHandler(async (req, res) => {
+        const { member_id, totp_token } = req.body;
+
+        if (!member_id || !totp_token) {
+            throw new AppError('Member ID and TOTP token are required', 400);
+        }
+
+        const user = await User.findByPk(member_id);
+
+        if (!user) {
+            throw new AppError('Utilisateur non trouvé', 404);
+        }
+
+        if (!user.email_verified) {
+            throw new AppError('Email non vérifié', 400);
+        }
+
+        if (user.status === 'active' && user.totp_verified) {
+            throw new AppError('Compte déjà activé', 400);
+        }
+
+        // Verify TOTP token
+        const secret = user.totp_secret_encrypted;
+        const verified = speakeasy.totp.verify({
+            secret,
+            encoding: 'base32',
+            token: totp_token,
+            window: 2
+        });
+
+        if (!verified) {
+            throw new AppError('Code 2FA incorrect. Vérifiez votre application d\'authentification.', 400);
+        }
+
+        // Complete registration
+        user.status = 'active';
+        user.totp_enabled = true;
+        user.totp_verified = true;
+        await user.save();
+
+        // Log registration complete
+        await AuditLog.logAction({
+            member_id,
+            action: 'REGISTER_COMPLETE',
+            resource_type: 'user',
+            resource_id: member_id.toString(),
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'auth'
+        });
+
+        logger.info('Registration completed', { member_id });
+
+        res.json({
+            success: true,
+            message: 'Inscription terminée ! Vous pouvez maintenant vous connecter.'
+        });
     })
 );
 
@@ -177,10 +395,10 @@ router.post('/login',
     validationRules.auth.login,
     asyncHandler(async (req, res) => {
         const { email, password, totp_token } = req.body;
-        
-        // Find user by email
-        const user = await User.findByEmail(email);
-        
+
+        // Find user by email (include inactive to give proper error message)
+        const user = await User.findByEmail(email, { includeInactive: true });
+
         if (!user) {
             // Log failed attempt
             await AuditLog.logAction({
@@ -192,8 +410,18 @@ router.post('/login',
                 error_message: 'Invalid credentials',
                 category: 'auth'
             });
-            
-            throw new AppError('Invalid email or password', 401);
+
+            throw new AppError('Email ou mot de passe incorrect', 401);
+        }
+
+        // Check if registration is complete
+        if (user.status === 'pending_verification') {
+            throw new AppError('Veuillez terminer votre inscription en vérifiant votre email', 403);
+        }
+
+        // Check if account is active
+        if (user.status !== 'active') {
+            throw new AppError('Ce compte est désactivé ou suspendu', 403);
         }
         
         // Check if account is locked
@@ -451,22 +679,25 @@ router.post('/verify-2fa',
 /**
  * POST /api/v1/auth/reset-password
  * Request password reset
+ * Note: Vérifie si l'email existe pour économiser les crédits d'envoi
  */
 router.post('/reset-password',
     validationRules.auth.resetPassword,
     asyncHandler(async (req, res) => {
         const { email } = req.body;
-        
+
         const user = await User.findByEmail(email);
-        
-        // Don't reveal if user exists
+
+        // Vérifier si l'email existe pour économiser les crédits d'envoi
         if (!user) {
-            return res.json({
-                success: true,
-                message: 'If the email exists, a reset link has been sent'
-            });
+            throw new AppError('Aucun compte n\'est associé à cette adresse email', 404);
         }
-        
+
+        // Vérifier que l'utilisateur est actif
+        if (user.status !== 'active') {
+            throw new AppError('Ce compte est désactivé', 403);
+        }
+
         // Generate reset token
         const resetToken = cryptoManager.generateToken();
         
@@ -613,6 +844,214 @@ router.get('/me',
                 totp_enabled: user.totp_enabled,
                 last_login: user.last_login
             }
+        });
+    })
+);
+
+/**
+ * POST /api/v1/auth/request-2fa-reset
+ * Request 2FA reset for self (authenticated user)
+ */
+router.post('/request-2fa-reset',
+    authenticateToken,
+    asyncHandler(async (req, res) => {
+        const user = await User.findByPk(req.user.member_id);
+
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        if (!user.totp_enabled) {
+            throw new AppError('2FA is not enabled for this account', 400);
+        }
+
+        // Generate reset token
+        const resetToken = cryptoManager.generateToken();
+
+        // Create reset token (utiliser 'totp_reset' qui est dans l'ENUM du modèle)
+        await RegistrationToken.create({
+            token_code: resetToken,
+            geo_id: user.geo_id,
+            created_by_member_id: user.member_id,
+            target_member_id: user.member_id,
+            token_type: 'totp_reset',
+            expires_at: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+        });
+
+        // Send email with reset link
+        try {
+            const notificationService = new NotificationService({
+                Notification,
+                User,
+                AuditLog
+            });
+            await notificationService.initialize();
+
+            const resetLink = `${config.app.frontendUrl}/auth/reset-2fa?token=${resetToken}`;
+
+            await notificationService.send(
+                user.member_id,
+                'account_2fa_reset',
+                { resetLink },
+                { channel: 'email', immediate: true }
+            );
+
+            logger.info('2FA reset email sent', { member_id: user.member_id });
+        } catch (emailError) {
+            logger.error('Failed to send 2FA reset email', {
+                member_id: user.member_id,
+                error: emailError.message
+            });
+        }
+
+        res.json({
+            success: true,
+            message: '2FA reset request submitted. Check your email for instructions.'
+        });
+    })
+);
+
+/**
+ * POST /api/v1/auth/reset-2fa-confirm
+ * Confirm 2FA reset with token
+ */
+router.post('/reset-2fa-confirm',
+    asyncHandler(async (req, res) => {
+        const { token, password } = req.body;
+
+        if (!token || !password) {
+            throw new AppError('Token and password are required', 400);
+        }
+
+        // Find reset token (utiliser 'totp_reset' qui est dans l'ENUM du modèle)
+        const resetToken = await RegistrationToken.findOne({
+            where: {
+                token_code: token,
+                token_type: 'totp_reset',
+                status: 'active',
+                expires_at: { [Op.gt]: new Date() }
+            }
+        });
+
+        if (!resetToken) {
+            throw new AppError('Invalid or expired reset token', 400);
+        }
+
+        // Get user and verify password
+        const user = await User.findByPk(resetToken.target_member_id);
+
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        // Verify password
+        const passwordValid = await cryptoManager.verifyPassword(password, user.password_hash);
+        if (!passwordValid) {
+            throw new AppError('Invalid password', 401);
+        }
+
+        // Generate new TOTP secret
+        const secret = speakeasy.generateSecret({
+            name: `SHUGO:${user.email_encrypted}`,
+            length: 32
+        });
+
+        // Update user
+        user.totp_secret_encrypted = cryptoManager.encrypt(secret.base32);
+        user.totp_enabled = true;
+        await user.save();
+
+        // Generate new backup codes
+        const backupCodes = await generateBackupCodes(user);
+
+        // Mark token as used
+        resetToken.status = 'used';
+        resetToken.used_at = new Date();
+        resetToken.used_by_member_id = user.member_id;
+        await resetToken.save();
+
+        // Generate QR code
+        const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+        // Log 2FA reset
+        await AuditLog.logAction({
+            member_id: user.member_id,
+            action: '2FA_RESET',
+            resource_type: 'user',
+            resource_id: user.member_id.toString(),
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'auth'
+        });
+
+        res.json({
+            success: true,
+            message: '2FA reset successfully',
+            data: {
+                qr_code: qrCodeUrl,
+                secret: secret.base32,
+                backup_codes: backupCodes
+            }
+        });
+    })
+);
+
+/**
+ * POST /api/v1/auth/request-password-reset-self
+ * Request password reset for authenticated user (self-service)
+ */
+router.post('/request-password-reset-self',
+    authenticateToken,
+    asyncHandler(async (req, res) => {
+        const user = await User.findByPk(req.user.member_id);
+
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        // Generate reset token
+        const resetToken = cryptoManager.generateToken();
+
+        // Create reset token
+        await RegistrationToken.create({
+            token_code: resetToken,
+            geo_id: user.geo_id,
+            created_by_member_id: user.member_id,
+            target_member_id: user.member_id,
+            token_type: 'password_reset',
+            expires_at: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+        });
+
+        // Send email with reset link
+        try {
+            const notificationService = new NotificationService({
+                Notification,
+                User,
+                AuditLog
+            });
+            await notificationService.initialize();
+
+            const resetLink = `${config.app.frontendUrl}/auth/reset-password?token=${resetToken}`;
+
+            await notificationService.send(
+                user.member_id,
+                'account_password_reset',
+                { resetLink },
+                { channel: 'email', immediate: true }
+            );
+
+            logger.info('Self password reset email sent', { member_id: user.member_id });
+        } catch (emailError) {
+            logger.error('Failed to send self password reset email', {
+                member_id: user.member_id,
+                error: emailError.message
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Password reset request submitted. Check your email for instructions.'
         });
     })
 );

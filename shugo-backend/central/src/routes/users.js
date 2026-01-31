@@ -70,20 +70,33 @@ router.get('/',
             offset: parseInt(offset),
             order: [['created_at', 'DESC']]
         });
-        
+
+        // Map users with decrypted data
+        const mappedUsers = users.map(u => ({
+            member_id: u.member_id,
+            email: u.email_encrypted,
+            first_name: u.first_name_encrypted,
+            last_name: u.last_name_encrypted,
+            role: u.role,
+            geo_id: u.geo_id,
+            status: u.status,
+            created_at: u.created_at
+        }));
+
+        logger.debug('Users fetched', {
+            count,
+            returned: mappedUsers.length,
+            sample: mappedUsers.length > 0 ? {
+                member_id: mappedUsers[0].member_id,
+                email: mappedUsers[0].email ? '***' : null,
+                first_name: mappedUsers[0].first_name || null
+            } : null
+        });
+
         res.json({
             success: true,
             data: {
-                users: users.map(u => ({
-                    member_id: u.member_id,
-                    email: u.email_encrypted,
-                    first_name: u.first_name_encrypted,
-                    last_name: u.last_name_encrypted,
-                    role: u.role,
-                    geo_id: u.geo_id,
-                    status: u.status,
-                    created_at: u.created_at
-                })),
+                users: mappedUsers,
                 pagination: {
                     total: count,
                     page: parseInt(page),
@@ -327,6 +340,75 @@ router.put('/:id',
             success: true,
             message: 'User updated successfully',
             data: user.getPublicProfile()
+        });
+    })
+);
+
+/**
+ * PATCH /api/v1/users/:id/status
+ * Update user status (admin only)
+ * Supports: active, inactive, suspended
+ */
+router.patch('/:id/status',
+    authenticateToken,
+    checkRole(['Admin', 'Admin_N1']),
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        // Validate status
+        const validStatuses = ['active', 'inactive', 'suspended'];
+        if (!validStatuses.includes(status)) {
+            throw new AppError(`Invalid status. Must be one of: ${validStatuses.join(', ')}`, 400);
+        }
+
+        const user = await User.findByPk(id);
+        if (!user) {
+            throw new AppError('User not found', 404);
+        }
+
+        // Prevent self-suspension
+        if (req.user.member_id == id && status === 'suspended') {
+            throw new AppError('Cannot suspend your own account', 400);
+        }
+
+        // Prevent non-Admin_N1 from modifying Admin_N1 users
+        if (user.role === 'Admin_N1' && req.user.role !== 'Admin_N1') {
+            throw new AppError('Only Admin_N1 can modify other Admin_N1 users', 403);
+        }
+
+        const oldStatus = user.status;
+        user.status = status;
+        await user.save();
+
+        // Log the action
+        await AuditLog.logAction({
+            member_id: req.user.member_id,
+            action: 'UPDATE_STATUS',
+            resource_type: 'user',
+            resource_id: id,
+            old_values: { status: oldStatus },
+            new_values: { status },
+            ip_address: req.ip,
+            user_agent: req.get('user-agent'),
+            result: 'success',
+            category: 'admin'
+        });
+
+        logger.info('User status updated', {
+            targetUserId: id,
+            oldStatus,
+            newStatus: status,
+            updatedBy: req.user.member_id
+        });
+
+        res.json({
+            success: true,
+            message: `User status updated to ${status}`,
+            data: {
+                member_id: user.member_id,
+                status: user.status
+            }
         });
     })
 );
@@ -859,9 +941,9 @@ router.post('/registration-tokens',
             throw new AppError('Only Admin or Admin_N1 can create Admin tokens', 403);
         }
 
-        // Generate token code and hash
+        // Generate token code and hash (16 caractères alphanumériques pour la sécurité)
         const crypto = require('crypto');
-        const tokenCode = RegistrationToken.generateCode(8);
+        const tokenCode = RegistrationToken.generateCode(16);
         const tokenHash = crypto.createHash('sha256').update(tokenCode).digest('hex');
 
         // Create registration token
@@ -1096,7 +1178,7 @@ router.post('/:id/reset-2fa',
 
         // Create a token for the user to complete 2FA setup
         const resetToken = await RegistrationToken.create({
-            token_code: RegistrationToken.generateCode(8),
+            token_code: RegistrationToken.generateCode(16),
             token_type: 'totp_reset',
             geo_id: user.geo_id,
             created_by_member_id: req.user.member_id,

@@ -394,6 +394,7 @@ class CryptoUtils {
     try {
       return this.decryptFromBase64(encrypted);
     } catch (e) {
+      console.error('[CryptoUtils] Decryption failed:', e.message, 'Data prefix:', encrypted.substring(0, 20));
       return encrypted; // Retourner la valeur originale si déchiffrement échoue
     }
   }

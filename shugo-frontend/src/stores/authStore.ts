@@ -110,12 +110,15 @@ export const useAuthStore = create<AuthState>()(
       logout: async () => {
         set({ isLoading: true });
 
+        // D'abord effacer les tokens locaux et le store persisté
+        clearTokens();
+        localStorage.removeItem('shugo-auth');
+
         try {
           await authService.logout();
         } catch {
-          // Ignore logout errors
+          // Ignore logout errors - tokens déjà effacés
         } finally {
-          clearTokens();
           set({
             user: null,
             isAuthenticated: false,

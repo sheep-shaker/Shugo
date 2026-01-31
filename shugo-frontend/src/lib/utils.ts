@@ -11,25 +11,37 @@ export function cn(...inputs: ClassValue[]) {
 /**
  * Format a date to French locale
  */
-export function formatDate(date: Date | string, options?: Intl.DateTimeFormatOptions): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    ...options,
-  });
+export function formatDate(date: Date | string | null | undefined, options?: Intl.DateTimeFormatOptions): string {
+  if (!date) return 'N/A';
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      ...options,
+    });
+  } catch {
+    return 'N/A';
+  }
 }
 
 /**
  * Format a time to French locale
  */
-export function formatTime(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleTimeString('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+export function formatTime(date: Date | string | null | undefined): string {
+  if (!date) return 'N/A';
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return 'N/A';
+  }
 }
 
 /**
@@ -146,25 +158,31 @@ export function getFullName(user: { first_name?: string; last_name?: string } | 
 /**
  * Format relative time (e.g., "il y a 2 heures")
  */
-export function formatRelativeTime(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.round(diffMs / 60000);
+export function formatRelativeTime(date: Date | string | null | undefined): string {
+  if (!date) return 'N/A';
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) return 'N/A';
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.round(diffMs / 60000);
 
-  if (diffMins < 0) {
-    const futureMins = Math.abs(diffMins);
-    if (futureMins < 60) return `Dans ${futureMins} min`;
-    const futureHours = Math.round(futureMins / 60);
-    if (futureHours < 24) return `Dans ${futureHours}h`;
-    return `Dans ${Math.round(futureHours / 24)}j`;
+    if (diffMins < 0) {
+      const futureMins = Math.abs(diffMins);
+      if (futureMins < 60) return `Dans ${futureMins} min`;
+      const futureHours = Math.round(futureMins / 60);
+      if (futureHours < 24) return `Dans ${futureHours}h`;
+      return `Dans ${Math.round(futureHours / 24)}j`;
+    }
+
+    if (diffMins < 1) return 'À l\'instant';
+    if (diffMins < 60) return `Il y a ${diffMins} min`;
+    const diffHours = Math.round(diffMins / 60);
+    if (diffHours < 24) return `Il y a ${diffHours}h`;
+    return `Il y a ${Math.round(diffHours / 24)}j`;
+  } catch {
+    return 'N/A';
   }
-
-  if (diffMins < 1) return 'À l\'instant';
-  if (diffMins < 60) return `Il y a ${diffMins} min`;
-  const diffHours = Math.round(diffMins / 60);
-  if (diffHours < 24) return `Il y a ${diffHours}h`;
-  return `Il y a ${Math.round(diffHours / 24)}j`;
 }
 
 /**
